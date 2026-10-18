@@ -1,4 +1,4 @@
-import React, { useRef } from 'react';
+import React, { useRef, useMemo } from 'react';
 import { useFrame } from '@react-three/fiber';
 import * as THREE from 'three';
 import { useAccessibility } from '@/context/AccessibilityContext';
@@ -76,7 +76,7 @@ export const MedicalShield: React.FC<{ position?: [number, number, number]; scal
 };
 
 export const ECGLine: React.FC<{ position?: [number, number, number] }> = ({ position = [0, 0, 0] }) => {
-  const points = React.useMemo(() => {
+  const geometry = useMemo(() => {
     const pts: THREE.Vector3[] = [];
     for (let i = 0; i < 40; i++) {
       const x = (i / 40) * 4 - 2;
@@ -88,14 +88,14 @@ export const ECGLine: React.FC<{ position?: [number, number, number] }> = ({ pos
       if (i === 14) y = 0.1;
       pts.push(new THREE.Vector3(x, y, 0));
     }
-    return pts;
+    const geo = new THREE.BufferGeometry().setFromPoints(pts);
+    return geo;
   }, []);
 
   return (
     <group position={position}>
-      <line>
-        <bufferGeometry attach="geometry" setFromPoints={points} />
-        <lineBasicMaterial attach="material" color="#0ea5e9" linewidth={2} />
+      <line geometry={geometry}>
+        <lineBasicMaterial color="#0ea5e9" linewidth={2} />
       </line>
     </group>
   );

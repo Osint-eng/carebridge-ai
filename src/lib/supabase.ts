@@ -4,13 +4,12 @@ const supabaseUrl = import.meta.env.VITE_SUPABASE_URL || '';
 const supabaseAnonKey = import.meta.env.VITE_SUPABASE_ANON_KEY || '';
 
 export const isSupabaseConfigured = Boolean(
-  supabaseUrl && 
-  supabaseAnonKey && 
+  supabaseUrl &&
+  supabaseAnonKey &&
   !supabaseUrl.includes('placeholder') &&
   supabaseUrl.startsWith('http')
 );
 
-// Local persistence storage keys
 const LOCAL_USERS_KEY = 'carebridge_users';
 const LOCAL_SESSION_KEY = 'carebridge_session';
 
@@ -20,32 +19,26 @@ if (isSupabaseConfigured) {
   try {
     supabase = createClient(supabaseUrl, supabaseAnonKey);
   } catch (err) {
-    console.warn('Failed to initialize Supabase client with provided credentials. Falling back to secure local storage.', err);
+    console.warn('Failed to initialize Supabase client. Falling back to local storage.', err);
   }
 }
 
-// Resilient local persistence provider matching Supabase auth interface strictly
 class LocalAuthStorage {
   private listeners: ((event: string, session: any) => void)[] = [];
 
   constructor() {
-    // Clean up any old legacy mock user so no default name is used
     try {
-      const users = this.getUsers();
+      const users = this.readUsers();
       const cleaned = users.filter((u: any) => u.email !== 'doctor@carebridge.ai');
-      if (cleaned.length !== users.length) {
-        this.saveUsers(cleaned);
-      }
-      const session = this.getSession();
-      if (session?.user?.email === 'doctor@carebridge.ai') {
-        this.setSession(null);
-      }
+      if (cleaned.length !== users.length) this.writeUsers(cleaned);
+      const session = this.readSession();
+      if (session?.user?.email === 'doctor@carebridge.ai') this.writeSession(null);
     } catch {
       // ignore
     }
   }
 
-  getUsers(): any[] {
+  private readUsers(): any[] {
     try {
       const data = localStorage.getItem(LOCAL_USERS_KEY);
       return data ? JSON.parse(data) : [];
@@ -54,11 +47,11 @@ class LocalAuthStorage {
     }
   }
 
-  saveUsers(users: any[]) {
+  private writeUsers(users: any[]) {
     localStorage.setItem(LOCAL_USERS_KEY, JSON.stringify(users));
   }
 
-  getSession() {
+  private readSession() {
     try {
       const data = localStorage.getItem(LOCAL_SESSION_KEY);
       return data ? JSON.parse(data) : null;
@@ -67,7 +60,7 @@ class LocalAuthStorage {
     }
   }
 
-  setSession(session: any) {
+  private writeSession(session: any) {
     if (session) {
       localStorage.setItem(LOCAL_SESSION_KEY, JSON.stringify(session));
     } else {
@@ -76,7 +69,7 @@ class LocalAuthStorage {
     this.notifyListeners(session ? 'SIGNED_IN' : 'SIGNED_OUT', session);
   }
 
-  notifyListeners(event: string, session: any) {
+  private notifyListeners(event: string, session: any) {
     this.listeners.forEach((listener) => listener(event, session));
   }
 
@@ -95,7 +88,7 @@ class LocalAuthStorage {
       return { data: { user: null, session: null }, error: { message: 'Password must be at least 6 characters.' } };
     }
 
-    const users = this.getUsers();
+    const users = this.readUsers();
     const existing = users.find((u: any) => u.email.toLowerCase() === trimmedEmail);
     if (existing) {
       return { data: { user: null, session: null }, error: { message: 'An account with this email already exists.' } };
@@ -109,16 +102,19 @@ class LocalAuthStorage {
       created_at: new Date().toISOString(),
     };
     users.push({ ...user, password: trimmedPassword });
-    this.saveUsers(users);
+    this.writeUsers(users);
 
-    const session = { user: { id: user.id, email: user.email, user_metadata: { full_name: user.full_name, role: user.role } }, access_token: 'local-' + user.id };
-    this.setSession(session);
+    const session = {
+      user: { id: user.id, email: user.email, user_metadata: { full_name: user.full_name, role: user.role } },
+      access_token: 'local-' + user.id,
+    };
+    this.writeSession(session);
     return { data: { user: session.user, session }, error: null };
   }
 
   async signInWithPassword({ email, password }: { email: string; password: string }) {
     const trimmedEmail = email?.trim().toLowerCase();
-    const users = this.getUsers();
+    const users = this.readUsers();
     const match = users.find((u: any) => u.email.toLowerCase() === trimmedEmail && u.password === password);
     if (!match) {
       return { data: { user: null, session: null }, error: { message: 'Invalid email or password.' } };
@@ -131,28 +127,27 @@ class LocalAuthStorage {
       },
       access_token: 'local-' + match.id,
     };
-    this.setSession(session);
+    this.writeSession(session);
     return { data: { user: session.user, session }, error: null };
   }
 
   async signOut() {
-    this.setSession(null);
+    this.writeSession(null);
     return { error: null };
   }
 
   async getSession() {
-    return { data: { session: this.getSession() }, error: null };
+    return { data: { session: this.readSession() }, error: null };
   }
 
   async getUser() {
-    const session = this.getSession();
+    const session = this.readSession();
     return { data: { user: session?.user || null }, error: null };
   }
 
   onAuthStateChange(callback: (event: string, session: any) => void) {
     this.listeners.push(callback);
-    // Immediately emit current state
-    const session = this.getSession();
+    const session = this.readSession();
     setTimeout(() => callback(session ? 'SIGNED_IN' : 'SIGNED_OUT', session), 0);
     return {
       data: {
@@ -169,7 +164,6 @@ class LocalAuthStorage {
 const localAuth = new LocalAuthStorage();
 
 if (!isSupabaseConfigured || !supabase) {
-  // Provide a supabase-compatible auth surface that uses local storage
   supabase = {
     auth: {
       signUp: localAuth.signUp.bind(localAuth),
