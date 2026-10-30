@@ -104,7 +104,6 @@ def section(lines: list[str], heads: list[str]) -> list[str]:
                     if out:
                         break
                     continue
-                # stop at next obvious heading
                 if any(l2.strip().upper().startswith(h.upper()) for h in
                        MED_HEADINGS + WARN_HEADINGS + FU_HEADINGS + DIET_HEADINGS + ACT_HEADINGS):
                     break
@@ -132,7 +131,6 @@ def parse_date(s: str):
 def parse_med_line(line: str) -> dict:
     original = line
     line = re.sub(r"^\s*(\d+[.)]|[-•*])\s*", "", line).strip()
-    # name = everything before first digit / dose pattern
     name_part = re.split(r"\s(?=\d|½|1/2)", line, maxsplit=1)[0].strip(" -:,")
     d = DOSE_RE.search(line)
     f = FREQ_RE.search(line)
@@ -169,7 +167,6 @@ def extract(text: str) -> dict:
             cells = [c.strip() for c in ln.strip("|").split("|")]
             if not cells or cells[0] in ("No", "") or len(cells) < 4:
                 continue
-            # typical table: No | Name | Dose | Route | Freq | Duration | Timing
             name = cells[1] if len(cells) > 1 else ""
             dose = cells[2] if len(cells) > 2 else ""
             freq = cells[4] if len(cells) > 4 else (cells[3] if len(cells) > 3 else "")
@@ -189,7 +186,6 @@ def extract(text: str) -> dict:
         if re.match(r"\s*(\d+[.)]|[-•*])\s", ln) or DOSE_RE.search(ln) or FREQ_RE.search(ln):
             meds.append(parse_med_line(ln))
 
-    # STOP medicines
     for ln in lines:
         m = re.match(r"\s*(?:[-•*]\s*)?(?:STOP|Stop)\s+((?:Tab|T|Cap|Inj|Syp)\..*)", ln)
         if m:
@@ -226,8 +222,6 @@ def extract(text: str) -> dict:
     }
 
 
-# Lightweight offline phrase map so translation is not pure English copy.
-# Doses stay Latin. Replace with real MT if contest rules allow an API.
 HI_MAP = {
     "YOUR MEDICINES": "आपकी दवाएँ",
     "STOP THESE": "इन दवाओं को बंद करें",
@@ -273,6 +267,18 @@ def plain_text(cp: dict, translate: bool = False) -> str:
     return "\n".join(out)
 
 
+def _pick_col(df: pd.DataFrame, candidates: list[str]) -> str:
+    """Return the first column name that exists (case-insensitive)."""
+    lower = {c.lower(): c for c in df.columns}
+    for cand in candidates:
+        if cand.lower() in lower:
+            return lower[cand.lower()]
+    raise KeyError(
+        f"None of {candidates} found in columns: {list(df.columns)}. "
+        f"Inspect data/h2/splits.csv and adjust."
+    )
+
+
 def main() -> None:
     ap = argparse.ArgumentParser()
     ap.add_argument("--split", choices=["dev", "test", "all"], default="test")
@@ -281,20 +287,31 @@ def main() -> None:
     a = ap.parse_args()
     data = Path(a.data_dir)
 
-    splits = pd.read_csv(data / "splits.csv")
+    splits_path = data / "splits.csv"
+    if not splits_path.exists():
+        raise FileNotFoundError(f"Missing {splits_path}. Run scripts/setup_h2_from_zip.sh first.")
+
+    splits = pd.read_csv(splits_path)
+    id_col = _pick_col(splits, ["id", "summary_id", "Id", "ID", "sid"])
+    split_col = _pick_col(splits, ["split", "Split", "set", "partition"])
+
     if a.split != "all":
-        ids = set(splits.loc[splits["split"] == a.split, "id"].astype(str))
+        ids = set(splits.loc[splits[split_col] == a.split, id_col].astype(str))
     else:
-        ids = set(splits["id"].astype(str))
+        ids = set(splits[id_col].astype(str))
 
     out = Path(a.out) if a.out else ROOT / "submission" / "H2_predictions.jsonl"
     out.parent.mkdir(parents=True, exist_ok=True)
 
+    summaries_path = data / "summaries.jsonl"
+    if not summaries_path.exists():
+        raise FileNotFoundError(f"Missing {summaries_path}.")
+
     n = 0
-    with open(data / "summaries.jsonl", encoding="utf-8") as f, open(out, "w", encoding="utf-8") as g:
+    with open(summaries_path, encoding="utf-8") as f, open(out, "w", encoding="utf-8") as g:
         for line in f:
             row = json.loads(line)
-            sid = str(row.get("id") or row.get("summary_id") or "")
+            sid = str(row.get("id") or row.get("summary_id") or row.get("Id") or "")
             if sid not in ids:
                 continue
             text = row.get("text") or row.get("summary") or row.get("discharge_summary") or ""
@@ -309,6 +326,11 @@ def main() -> None:
             g.write(json.dumps(pred, ensure_ascii=False) + "\n")
             n += 1
     print(f"Wrote {n} predictions to {out}")
+    if n == 0:
+        print("WARNING: 0 predictions written. Check that split values in splits.csv")
+        print(f"  match --split={a.split!r} and that summary ids overlap.")
+        print(f"  splits columns: {list(splits.columns)}")
+        print(f"  unique split values: {sorted(splits[split_col].astype(str).unique())}")
 
 
 if __name__ == "__main__":
