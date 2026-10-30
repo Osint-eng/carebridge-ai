@@ -54,6 +54,7 @@ export function getNavForRole(role: UserRole | undefined): NavItemDef[] {
     { label: 'Extraction', path: '/extraction', iconName: 'FileSearch', section: 'Clinical' },
     { label: 'Generate Care Plan', path: '/care-plan', iconName: 'HeartHandshake', section: 'Clinical' },
     { label: 'Faithfulness Audit', path: '/faithfulness', iconName: 'ShieldCheck', section: 'Clinical' },
+    { label: 'Verification inbox', path: '/verification-inbox', iconName: 'ClipboardList', section: 'Clinical' },
     { label: 'Translation Check', path: '/translation', iconName: 'Languages', section: 'Clinical' },
     { label: 'Readability', path: '/readability', iconName: 'BookOpenCheck', section: 'Clinical' },
     { label: 'Document Library', path: '/documents', iconName: 'FolderArchive', section: 'Records' },
