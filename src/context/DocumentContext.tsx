@@ -524,3 +524,6 @@ export function useDocument() {
   if (!ctx) throw new Error('useDocument must be used within DocumentProvider');
   return ctx;
 }
+
+// Backward-compatible alias for pages that still import the plural hook name.
+export const useDocuments = useDocument;
