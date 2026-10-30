@@ -67,7 +67,7 @@ declare module 'react' {
   const StrictMode: any;
   const Fragment: any;
   type FC<P = any> = (props: P & { children?: any }) => any;
-  type ReactNode: any;
+  type ReactNode = any;
   type CSSProperties = Record<string, any>;
   type FormEvent<T = any> = any;
   type ChangeEvent<T = any> = any;
