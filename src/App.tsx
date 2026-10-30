@@ -21,6 +21,7 @@ import { DocumentsPage } from '@/pages/DocumentsPage';
 import { AnalyticsPage } from '@/pages/AnalyticsPage';
 import { SettingsPage } from '@/pages/SettingsPage';
 import { AdminPage } from '@/pages/AdminPage';
+import { VerificationInboxPage } from '@/pages/VerificationInboxPage';
 
 export const App: React.FC = () => {
   return (
@@ -52,6 +53,7 @@ export const App: React.FC = () => {
         <Route path="/analytics" element={<AnalyticsPage />} />
         <Route path="/settings" element={<SettingsPage />} />
         <Route path="/admin" element={<AdminPage />} />
+        <Route path="/verification-inbox" element={<VerificationInboxPage />} />
       </Route>
 
       {/* Fallback */}
