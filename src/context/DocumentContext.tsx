@@ -524,3 +524,6 @@ export function useDocument() {
   if (!ctx) throw new Error('useDocument must be used within DocumentProvider');
   return ctx;
 }
+
+// Alias used by several pages
+export const useDocuments = useDocument;
