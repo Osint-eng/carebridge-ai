@@ -1,11 +1,11 @@
 import React from 'react';
-import { useDocuments } from '@/context/DocumentContext';
+import { useDocument } from '@/context/DocumentContext';
 import { Canvas } from '@react-three/fiber';
 import { VerificationScanner3D } from '@/components/3d/VerificationScanner3D';
 import { CameraRig } from '@/components/3d/CameraRig';
 
 export const FaithfulnessPage: React.FC = () => {
-  const { currentDoc, runFaithfulnessCheck, isProcessing, processingStage } = useDocuments();
+  const { currentDoc, runFaithfulnessCheck, isProcessing, processingStage } = useDocument();
 
   const handleCheck = async (injectError = false) => {
     if (!currentDoc) return;
