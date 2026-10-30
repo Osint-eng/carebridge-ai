@@ -9,6 +9,7 @@ import {
   MedicationItem,
   WarningSign,
   FollowUpInstruction,
+  MismatchDetail,
 } from '@/types';
 import { useAuth } from './AuthContext';
 import { validateDischargeSummary } from '@/utils/dischargeValidator';
@@ -36,10 +37,27 @@ interface DocumentContextType {
 const DocumentContext = createContext<DocumentContextType | undefined>(undefined);
 
 const STORAGE_KEY = 'carebridge_documents';
+const FAITHFULNESS_THRESHOLD = 0.8;
 
 const SAMPLE_CARDIO = `DISCHARGE SUMMARY\nHospital: City Medical Center\nPatient: John Doe\nAdmission Date: 2024-01-10\nDischarge Date: 2024-01-15\n\nPrimary Diagnosis: ST-Elevation Myocardial Infarction (STEMI)\nSecondary Diagnosis: Hypertension, Hyperlipidemia\n\nHospital Course: Patient presented with acute chest pain. Underwent primary PCI with stent placement to LAD. Uneventful recovery.\n\nMedications on Discharge:\n1. Aspirin 81 mg oral once daily indefinitely\n2. Clopidogrel 75 mg oral once daily for 12 months\n3. Atorvastatin 40 mg oral once daily at bedtime\n4. Metoprolol 25 mg oral twice daily\n5. Lisinopril 10 mg oral once daily\n\nDiet: Heart-healthy low-sodium diet. Limit saturated fats.\nActivity: Gradual increase in walking. Avoid heavy lifting >10 lbs for 2 weeks.\n\nFollow-up: Cardiology clinic in 1 week. Primary care in 2 weeks.\n\nWarning Signs: Seek emergency care for chest pain, shortness of breath, or sudden weakness.`;
 
 const SAMPLE_DIABETES = `DISCHARGE SUMMARY\nHospital: Regional Health System\nPatient: Jane Smith\nAdmission: 2024-02-01  Discharge: 2024-02-05\n\nPrimary Diagnosis: Type 2 Diabetes Mellitus with hyperglycemia\n\nMedications:\n1. Metformin 1000 mg oral twice daily with meals\n2. Insulin Glargine 20 units subcutaneous at bedtime\n3. Empagliflozin 10 mg oral once daily\n\nDiet: Carbohydrate-controlled diabetic diet. Monitor blood glucose.\nActivity: Daily walking 30 minutes as tolerated.\n\nFollow-up: Endocrinology in 2 weeks. Diabetes education class.\n\nWarnings: Call for blood sugar <70 or >300, severe dizziness, or confusion.`;
+
+function normalize(s: string): string {
+  return (s || '')
+    .toLowerCase()
+    .replace(/[^a-z0-9.\/½]/g, ' ')
+    .replace(/\s+/g, ' ')
+    .trim();
+}
+
+function sourceContains(source: string, fragment: string): boolean {
+  if (!fragment.trim()) return true;
+  const src = normalize(source);
+  const frag = normalize(fragment);
+  if (!frag) return true;
+  return src.includes(frag) || frag.split(' ').every((t) => !t || src.includes(t));
+}
 
 export const DocumentProvider: React.FC<{ children: React.ReactNode }> = ({ children }) => {
   const { user } = useAuth();
@@ -117,7 +135,12 @@ export const DocumentProvider: React.FC<{ children: React.ReactNode }> = ({ chil
 
   const loadSampleDocument = async (type: 'cardio' | 'diabetes' | 'mismatch_test'): Promise<DischargeDocument> => {
     const content = type === 'diabetes' ? SAMPLE_DIABETES : SAMPLE_CARDIO;
-    const name = type === 'diabetes' ? 'sample-diabetes-discharge.txt' : type === 'mismatch_test' ? 'sample-mismatch-test.txt' : 'sample-cardio-discharge.txt';
+    const name =
+      type === 'diabetes'
+        ? 'sample-diabetes-discharge.txt'
+        : type === 'mismatch_test'
+          ? 'sample-mismatch-test.txt'
+          : 'sample-cardio-discharge.txt';
     return uploadDocument({ name, content, size: content.length });
   };
 
@@ -126,21 +149,36 @@ export const DocumentProvider: React.FC<{ children: React.ReactNode }> = ({ chil
     if (!doc?.extractedData?.rawText) throw new Error('No document text');
 
     setIsProcessing(true);
-    setProcessingStage('Running AI extraction...');
+    setProcessingStage('Running extraction...');
 
     const text = doc.extractedData.rawText;
     const meds: MedicationItem[] = [];
-    const medRegex = /(\d+)\.\s*([A-Za-z][A-Za-z\s]+?)\s+(\d+\s*mg|\d+\s*units?)\s+(oral|subcutaneous|intravenous)?\s*(once daily|twice daily|at bedtime|with meals|for \d+ months)?/gi;
-    let m;
+
+    const medRegex =
+      /(?:^|\n)\s*(?:\d+[.)]|[-•*])?\s*([A-Za-z][A-Za-z0-9\s.\/-]{1,40}?)\s+(
+        (?:\d+(?:\.\d+)?|½|1\/2)\s*(?:mg|mcg|units?|U|IU|ml|mL|tabs?|tab|puffs?)|
+        \d+(?:\.\d+)?\s*-\s*\d+(?:\.\d+)?\s*-\s*\d+(?:\.\d+)?\s*(?:units?|U)?
+      )\s*(oral|subcutaneous|intravenous|IV|SC|PO)?\s*(
+        once\s+(?:a\s+)?(?:day|daily)|twice\s+(?:a\s+)?(?:day|daily)|thrice\s+(?:a\s+)?(?:day|daily)|
+        three\s+times\s+(?:a\s+)?(?:day|daily)|at\s+bedtime|with\s+meals|OD|BD|TDS|QID|HS|SOS|PRN|
+        [½1\/2\d]\s*-\s*[½1\/2\d]\s*-\s*[½1\/2\d]|\d-\d-\d
+      )?\s*(for\s+\d+\s+\w+|indefinitely|lifelong|x\s*\d+\s*(?:days?|weeks?|months?))?/gim;
+
+    let m: RegExpExecArray | null;
+    const seen = new Set<string>();
     while ((m = medRegex.exec(text)) !== null) {
+      const name = m[1].trim().replace(/\s+/g, ' ');
+      const key = normalize(name);
+      if (seen.has(key) || name.length < 2) continue;
+      seen.add(key);
       meds.push({
         id: crypto.randomUUID(),
-        name: m[2].trim(),
-        dose: m[3].trim(),
-        frequency: (m[5] || 'as directed').trim(),
-        duration: 'as prescribed',
-        route: (m[4] || 'oral').trim(),
-        sourceQuote: m[0],
+        name,
+        dose: (m[2] || '').trim(),
+        frequency: (m[4] || 'as directed').trim(),
+        duration: (m[5] || 'as prescribed').trim(),
+        route: (m[3] || 'oral').trim(),
+        sourceQuote: m[0].trim().slice(0, 200),
       });
     }
 
@@ -156,26 +194,38 @@ export const DocumentProvider: React.FC<{ children: React.ReactNode }> = ({ chil
       rawText: text,
     };
 
-    if (text.toLowerCase().includes('diet:')) {
-      const dietMatch = text.match(/Diet:\s*([^\n]+)/i);
-      if (dietMatch) extracted.dietInstructions.push(dietMatch[1].trim());
-    }
-    if (text.toLowerCase().includes('activity:')) {
-      const actMatch = text.match(/Activity:\s*([^\n]+)/i);
-      if (actMatch) extracted.activityInstructions.push(actMatch[1].trim());
-    }
-    if (text.toLowerCase().includes('warning')) {
+    const dietMatch = text.match(/(?:Diet|Dietary advice|NUTRITION)\s*[:\-]\s*([^\n]+)/i);
+    if (dietMatch) extracted.dietInstructions.push(dietMatch[1].trim());
+
+    const actMatch = text.match(/(?:Activity|PHYSICAL ACTIVITY|Exercise)\s*[:\-]\s*([^\n]+)/i);
+    if (actMatch) extracted.activityInstructions.push(actMatch[1].trim());
+
+    const warnMatch = text.match(
+      /(?:Warning Signs?|Danger signs|WHEN TO SEEK HELP|RETURN TO EMERGENCY)\s*[:\-]?\s*([^\n]+(?:\n[-•*].+)*)/i,
+    );
+    if (warnMatch) {
       extracted.warningSigns.push({
         id: crypto.randomUUID(),
-        sign: 'Seek emergency care for chest pain or shortness of breath',
-        actionRequired: 'Call emergency services',
+        sign: warnMatch[1].trim().slice(0, 300),
+        actionRequired: 'Seek emergency care / contact physician',
         urgency: 'emergency',
-        sourceQuote: 'Warning Signs section',
+        sourceQuote: warnMatch[0].slice(0, 200),
+      });
+    }
+
+    const fuMatch = text.match(/(?:Follow[- ]?up|F\/U|REVIEW)\s*[:\-]?\s*([^\n]+)/i);
+    if (fuMatch) {
+      extracted.followUps.push({
+        id: crypto.randomUUID(),
+        departmentOrDoctor: '',
+        dateOrTimeframe: fuMatch[1].trim(),
+        purpose: fuMatch[1].trim(),
+        sourceQuote: fuMatch[0].slice(0, 200),
       });
     }
 
     setDocuments((prev) =>
-      prev.map((d) => (d.id === docId ? { ...d, extractedData: extracted, status: 'Validated' as const } : d))
+      prev.map((d) => (d.id === docId ? { ...d, extractedData: extracted, status: 'Validated' as const } : d)),
     );
     if (currentDoc?.id === docId) {
       setCurrentDoc((prev) => (prev ? { ...prev, extractedData: extracted, status: 'Validated' } : null));
@@ -204,7 +254,8 @@ export const DocumentProvider: React.FC<{ children: React.ReactNode }> = ({ chil
       dietInstructions: doc.extractedData.dietInstructions,
       activityInstructions: doc.extractedData.activityInstructions,
       followUps: doc.extractedData.followUps,
-      patientFriendlySummary: 'Your care plan has been prepared from your hospital discharge summary. Follow the medication schedule and contact your doctor if you have concerns.',
+      patientFriendlySummary:
+        'Your care plan has been prepared from your hospital discharge summary. Follow the medication schedule and contact your doctor if you have concerns.',
     };
 
     setDocuments((prev) => prev.map((d) => (d.id === docId ? { ...d, carePlan: plan } : d)));
@@ -215,37 +266,121 @@ export const DocumentProvider: React.FC<{ children: React.ReactNode }> = ({ chil
     return plan;
   };
 
-  const runFaithfulnessCheck = async (docId: string, introduceTestError = false): Promise<FaithfulnessReport> => {
+  /** Real source-vs-care-plan comparison. Fails on altered dose / frequency / duration / follow-up. */
+  const runFaithfulnessCheck = async (
+    docId: string,
+    introduceTestError = false,
+  ): Promise<FaithfulnessReport> => {
     const doc = documents.find((d) => d.id === docId);
     if (!doc?.carePlan) throw new Error('Generate care plan first');
 
     setIsProcessing(true);
     setProcessingStage('Running faithfulness audit...');
 
-    const mismatches = introduceTestError
-      ? [{
-          id: crypto.randomUUID(),
-          category: 'Dose' as const,
-          itemName: doc.carePlan.medications[0]?.name || 'Medication',
-          sourceText: doc.carePlan.medications[0]?.dose || '',
-          carePlanText: 'WRONG DOSE (test error)',
-          status: 'CRITICAL_MISMATCH' as const,
-          explanation: 'Injected test dosage error for demonstration.',
-          isFatal: true,
-        }]
-      : [];
+    const source = doc.extractedData?.rawText || '';
+    const plan = doc.carePlan;
+    const mismatches: MismatchDetail[] = [];
 
-    // Faithfulness pass threshold = 0.8 (80%). Any fatal mismatch fails.
-    const FAITHFULNESS_THRESHOLD = 0.8;
+    for (const med of plan.medications) {
+      if (med.dose && !sourceContains(source, med.dose)) {
+        mismatches.push({
+          id: crypto.randomUUID(),
+          category: 'Dose',
+          itemName: med.name,
+          sourceText: '(not found in source)',
+          carePlanText: med.dose,
+          status: 'CRITICAL_MISMATCH',
+          explanation: `Dose "${med.dose}" for ${med.name} does not appear in the source discharge summary.`,
+          isFatal: true,
+        });
+      }
+      if (med.frequency && med.frequency !== 'as directed' && !sourceContains(source, med.frequency)) {
+        mismatches.push({
+          id: crypto.randomUUID(),
+          category: 'Frequency',
+          itemName: med.name,
+          sourceText: '(not found in source)',
+          carePlanText: med.frequency,
+          status: 'CRITICAL_MISMATCH',
+          explanation: `Frequency "${med.frequency}" for ${med.name} does not appear in the source.`,
+          isFatal: true,
+        });
+      }
+      if (
+        med.duration &&
+        med.duration !== 'as prescribed' &&
+        !sourceContains(source, med.duration)
+      ) {
+        mismatches.push({
+          id: crypto.randomUUID(),
+          category: 'Duration',
+          itemName: med.name,
+          sourceText: '(not found in source)',
+          carePlanText: med.duration,
+          status: 'CRITICAL_MISMATCH',
+          explanation: `Duration "${med.duration}" for ${med.name} does not appear in the source.`,
+          isFatal: true,
+        });
+      }
+    }
+
+    for (const fu of plan.followUps) {
+      const token = fu.dateOrTimeframe || fu.purpose || '';
+      if (token && !sourceContains(source, token)) {
+        mismatches.push({
+          id: crypto.randomUUID(),
+          category: 'Follow-up',
+          itemName: token.slice(0, 40),
+          sourceText: '(not found in source)',
+          carePlanText: token,
+          status: 'CRITICAL_MISMATCH',
+          explanation: `Follow-up text "${token}" is not present in the source.`,
+          isFatal: true,
+        });
+      }
+    }
+
+    if (introduceTestError) {
+      mismatches.push({
+        id: crypto.randomUUID(),
+        category: 'Dose',
+        itemName: plan.medications[0]?.name || 'Medication',
+        sourceText: plan.medications[0]?.dose || '',
+        carePlanText: 'WRONG DOSE (test error)',
+        status: 'CRITICAL_MISMATCH',
+        explanation: 'Injected test dosage error for demonstration.',
+        isFatal: true,
+      });
+    }
+
     const checksTotal = 9;
     const checksFailed = mismatches.length;
-    const checksPassed = checksTotal - checksFailed;
+    const checksPassed = Math.max(0, checksTotal - checksFailed);
     const scoreRatio = checksPassed / checksTotal;
     const scorePercentage = Math.round(scoreRatio * 100);
     const overallStatus =
       mismatches.some((m) => m.isFatal) || scoreRatio < FAITHFULNESS_THRESHOLD
         ? 'VALIDATION_FAILED'
         : 'VERIFIED';
+
+    const categoryScores = [
+      'Medication',
+      'Dose',
+      'Frequency',
+      'Duration',
+      'Route',
+      'Follow-up',
+      'Warnings',
+      'Diet',
+      'Activity',
+    ].map((category) => {
+      const catFails = mismatches.filter((m) => m.category === category).length;
+      return {
+        category,
+        passed: catFails === 0,
+        accuracy: catFails === 0 ? 100 : Math.max(0, 100 - catFails * 40),
+      };
+    });
 
     const report: FaithfulnessReport = {
       id: crypto.randomUUID(),
@@ -257,17 +392,7 @@ export const DocumentProvider: React.FC<{ children: React.ReactNode }> = ({ chil
       checksPassed,
       checksFailed,
       mismatches,
-      categoryScores: [
-        { category: 'Medication', passed: true, accuracy: 100 },
-        { category: 'Dose', passed: !mismatches.length, accuracy: mismatches.length ? 0 : 100 },
-        { category: 'Frequency', passed: true, accuracy: 100 },
-        { category: 'Duration', passed: true, accuracy: 100 },
-        { category: 'Route', passed: true, accuracy: 100 },
-        { category: 'Follow-up', passed: true, accuracy: 100 },
-        { category: 'Warnings', passed: true, accuracy: 100 },
-        { category: 'Diet', passed: true, accuracy: 100 },
-        { category: 'Activity', passed: true, accuracy: 100 },
-      ],
+      categoryScores,
     };
 
     setDocuments((prev) =>
@@ -277,10 +402,12 @@ export const DocumentProvider: React.FC<{ children: React.ReactNode }> = ({ chil
               ...d,
               faithfulnessReport: report,
               faithfulnessScore: report.scorePercentage,
-              carePlan: d.carePlan ? { ...d.carePlan, status: mismatches.length ? 'failed' : 'verified' } : d.carePlan,
+              carePlan: d.carePlan
+                ? { ...d.carePlan, status: overallStatus === 'VERIFIED' ? 'verified' : 'failed' }
+                : d.carePlan,
             }
-          : d
-      )
+          : d,
+      ),
     );
     if (currentDoc?.id === docId) {
       setCurrentDoc((prev) =>
@@ -289,9 +416,11 @@ export const DocumentProvider: React.FC<{ children: React.ReactNode }> = ({ chil
               ...prev,
               faithfulnessReport: report,
               faithfulnessScore: report.scorePercentage,
-              carePlan: prev.carePlan ? { ...prev.carePlan, status: mismatches.length ? 'failed' : 'verified' } : prev.carePlan,
+              carePlan: prev.carePlan
+                ? { ...prev.carePlan, status: overallStatus === 'VERIFIED' ? 'verified' : 'failed' }
+                : prev.carePlan,
             }
-          : null
+          : null,
       );
     }
 
@@ -300,19 +429,36 @@ export const DocumentProvider: React.FC<{ children: React.ReactNode }> = ({ chil
     return report;
   };
 
-  const translateCarePlan = async (docId: string, targetLanguage: 'Telugu' | 'English' | 'Hindi'): Promise<TranslatedCarePlan> => {
+  const translateCarePlan = async (
+    docId: string,
+    targetLanguage: 'Telugu' | 'English' | 'Hindi',
+  ): Promise<TranslatedCarePlan> => {
     const doc = documents.find((d) => d.id === docId);
     if (!doc?.carePlan) throw new Error('No care plan');
 
+    const hi = targetLanguage === 'Hindi';
     const translated: TranslatedCarePlan = {
       language: targetLanguage,
-      languageNativeName: targetLanguage === 'Telugu' ? 'తెలుగు' : targetLanguage === 'Hindi' ? 'हिन्दी' : 'English',
-      patientFriendlySummary: doc.carePlan.patientFriendlySummary,
-      medications: doc.carePlan.medications.map((m) => ({ ...m, translatedInstructions: `${m.dose} ${m.frequency}` })),
-      warningSigns: doc.carePlan.warningSigns.map((w) => ({ ...w, translatedSign: w.sign, translatedAction: w.actionRequired })),
+      languageNativeName:
+        targetLanguage === 'Telugu' ? 'తెలుగు' : targetLanguage === 'Hindi' ? 'हिन्दी' : 'English',
+      patientFriendlySummary: hi
+        ? 'आपकी देखभाल योजना अस्पताल के डिस्चार्ज सारांश से बनाई गई है। दवा का शेड्यूल पालन करें।'
+        : doc.carePlan.patientFriendlySummary,
+      medications: doc.carePlan.medications.map((m) => ({
+        ...m,
+        translatedInstructions: `${m.dose} ${m.frequency}`.trim(),
+      })),
+      warningSigns: doc.carePlan.warningSigns.map((w) => ({
+        ...w,
+        translatedSign: w.sign,
+        translatedAction: w.actionRequired,
+      })),
       dietInstructions: doc.carePlan.dietInstructions,
       activityInstructions: doc.carePlan.activityInstructions,
-      followUps: doc.carePlan.followUps.map((f) => ({ ...f, translatedInstructions: f.dateOrTimeframe })),
+      followUps: doc.carePlan.followUps.map((f) => ({
+        ...f,
+        translatedInstructions: f.dateOrTimeframe,
+      })),
       translationFaithfulnessStatus: 'Verified',
       translatedAt: new Date().toISOString(),
     };
@@ -321,8 +467,8 @@ export const DocumentProvider: React.FC<{ children: React.ReactNode }> = ({ chil
       prev.map((d) =>
         d.id === docId
           ? { ...d, translations: { ...(d.translations || {}), [targetLanguage]: translated } }
-          : d
-      )
+          : d,
+      ),
     );
     return translated;
   };
