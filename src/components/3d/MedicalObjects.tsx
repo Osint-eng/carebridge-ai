@@ -94,6 +94,8 @@ export const ECGLine: React.FC<{ position?: [number, number, number] }> = ({ pos
 
   return (
     <group position={position}>
+      {/* R3F line primitive (not SVG <line>) */}
+      {/* @ts-expect-error R3F <line> vs SVG line */}
       <line geometry={geometry}>
         <lineBasicMaterial color="#0ea5e9" linewidth={2} />
       </line>
