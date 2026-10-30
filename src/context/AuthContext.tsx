@@ -7,20 +7,13 @@ interface AuthContextType {
   profile: UserProfile | null;
   loading: boolean;
   isSupabaseConfigured: boolean;
-  /** Password step — may return requiresMfa: true without granting a session */
-  login: (
-    email: string,
-    password: string
-  ) => Promise<{ error?: string; user?: any; requiresMfa?: boolean; email?: string }>;
-  /** MFA step — required after successful password verification */
-  verifyMfa: (pin: string) => Promise<{ error?: string; user?: any }>;
+  login: (email: string, password: string) => Promise<{ error?: string; user?: any }>;
   signup: (
     fullName: string,
     email: string,
     password: string,
     role: UserRole,
-    preferredLanguage: 'English' | 'Telugu' | 'Hindi' | 'Tamil',
-    mfaPin: string
+    preferredLanguage: 'English' | 'Telugu' | 'Hindi' | 'Tamil'
   ) => Promise<{ error?: string; user?: any }>;
   logout: () => Promise<void>;
   updateProfile: (data: Partial<UserProfile>) => Promise<{ error?: string }>;
@@ -69,7 +62,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
 
     const { data: authListener } = supabase.auth.onAuthStateChange(
       async (_event: string, session: any) => {
-        if (session?.user && session?.mfa_verified !== false) {
+        if (session?.user) {
           setUser(session.user);
           setProfile(mapUserToProfile(session.user));
         } else {
@@ -87,7 +80,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
   const login = async (
     email: string,
     password: string
-  ): Promise<{ error?: string; user?: any; requiresMfa?: boolean; email?: string }> => {
+  ): Promise<{ error?: string; user?: any }> => {
     try {
       const emailNorm = email.trim().toLowerCase();
       const passwordTrim = password.trim();
@@ -103,12 +96,6 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
 
       if (error) return { error: error.message };
 
-      // Local auth: password OK → MFA required (no session yet)
-      if (data?.requiresMfa) {
-        return { requiresMfa: true, email: data.email || emailNorm };
-      }
-
-      // Real Supabase path (if configured without MFA): session granted
       if (data?.user) {
         setUser(data.user);
         setProfile(mapUserToProfile(data.user));
@@ -121,31 +108,12 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
     }
   };
 
-  const verifyMfa = async (pin: string): Promise<{ error?: string; user?: any }> => {
-    try {
-      if (!supabase.auth.verifyMfa) {
-        return { error: 'MFA is not available.' };
-      }
-      const { data, error } = await supabase.auth.verifyMfa({ pin: pin.trim() });
-      if (error) return { error: error.message };
-      if (data?.user) {
-        setUser(data.user);
-        setProfile(mapUserToProfile(data.user));
-        return { user: data.user };
-      }
-      return { error: 'MFA verification failed.' };
-    } catch (err: any) {
-      return { error: err.message || 'MFA verification failed.' };
-    }
-  };
-
   const signup = async (
     fullName: string,
     email: string,
     password: string,
     role: UserRole,
-    preferredLanguage: 'English' | 'Telugu' | 'Hindi' | 'Tamil',
-    mfaPin: string
+    preferredLanguage: 'English' | 'Telugu' | 'Hindi' | 'Tamil'
   ): Promise<{ error?: string; user?: any }> => {
     try {
       const { data, error } = await supabase.auth.signUp({
@@ -156,7 +124,6 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
             full_name: fullName.trim(),
             role,
             preferred_language: preferredLanguage,
-            mfa_pin: mfaPin.trim(),
           },
         },
       });
@@ -215,7 +182,6 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
         loading,
         isSupabaseConfigured,
         login,
-        verifyMfa,
         signup,
         logout,
         updateProfile,
