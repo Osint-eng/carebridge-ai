@@ -1,8 +1,8 @@
 import React, { useMemo } from 'react';
-import { useDocuments } from '@/context/DocumentContext';
+import { useDocument } from '@/context/DocumentContext';
 
 export const ReadabilityPage: React.FC = () => {
-  const { currentDoc, calculateReadability } = useDocuments();
+  const { currentDoc, calculateReadability } = useDocument();
 
   const metrics = useMemo(() => {
     if (!currentDoc) return null;
