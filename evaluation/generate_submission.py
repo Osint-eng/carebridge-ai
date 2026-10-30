@@ -42,23 +42,13 @@ FREQ_RE = re.compile(
     r"twice\s+(?:a\s+)?daily|once\s+(?:a\s+)?daily|thrice\s+(?:a\s+)?daily",
     re.I,
 )
-# Explicit unit doses
 DOSE_UNIT_RE = re.compile(
     r"(\d+(?:\.\d+)?)\s*(mg|mcg|µg|ug|units?|U|IU|ml|mL|puffs?|tabs?|tab|tablets?|drops?|g)\b",
     re.I,
 )
-# Half tab
 HALF_RE = re.compile(r"(½|1/2|0\.5)\s*(tab|tabs?|tablet|tablets?)\b", re.I)
-# Multi-slot insulin style
 SLOT_RE = re.compile(r"(\d+(?:\.\d+)?\s*-\s*\d+(?:\.\d+)?\s*-\s*\d+(?:\.\d+)?)(?:\s*(units?|U|IU))?", re.I)
-# Brand trailing number without unit: "Flagyl 400", "Calpol 650", "Aldactone 25"
-BRAND_NUM_RE = re.compile(
-    r"\b(?:Tab\.?|T\.?|Cap\.?|Inj\.?|Inh\.?|Syp\.?)?\s*[A-Za-z][A-Za-z0-9+\- ]*?\s+(\d+(?:\.\d+)?)\b(?!\s*(?:mg|mcg|ug|µg|ml|puff|tab|unit|day|days|/))",
-    re.I,
-)
-# Puff count preferred for inhalers
 PUFF_RE = re.compile(r"(\d+)\s*puffs?\b", re.I)
-# "1 tab" style quantity
 TAB_QTY_RE = re.compile(r"\b(\d+)\s*(tab|tabs?|tablet|tablets?)\b", re.I)
 
 DUR_RE = re.compile(
@@ -68,8 +58,8 @@ DUR_RE = re.compile(
     re.I,
 )
 DATE_RE = re.compile(
-    r"\d{1,2}[/.-]\d{1,2}[/.-]\d{4}|"
-    r"\d{1,2}-[A-Za-z]{3}-\d{2}|"
+    r"\d{1,2}[/.-]\d{1,2}[/.-]\d{2,4}|"
+    r"\d{1,2}-[A-Za-z]{3}-\d{2,4}|"
     r"\d{1,2}(?:st|nd|rd|th)?\s+[A-Za-z]+\s+\d{4}"
 )
 
@@ -90,17 +80,31 @@ def section(lines, heads):
 
 def parse_date(s):
     s = s.strip()
-    for fmt in ("%d/%m/%Y", "%d-%m-%Y", "%d.%m.%Y"):
+    for fmt in ("%d/%m/%Y", "%d-%m-%Y", "%d.%m.%Y", "%d/%m/%y", "%d-%m-%y"):
         try:
             return datetime.strptime(s, fmt).date()
         except ValueError:
             pass
-    m = re.match(r"(\d{1,2})-([A-Za-z]{3})-(\d{2})$", s)
+    m = re.match(r"(\d{1,2})-([A-Za-z]{3})-(\d{2,4})$", s)
     if m:
-        return date(2000 + int(m.group(3)), MONTHS[m.group(2).lower()], int(m.group(1)))
-    m = re.match(r"(\d{1,2})(?:st|nd|rd|th)?\s+([A-Za-z]+)\s+\d{4}$", s)
+        yy = int(m.group(3))
+        if yy < 100:
+            yy += 2000
+        mon = MONTHS.get(m.group(2).lower())
+        if mon:
+            try:
+                return date(yy, mon, int(m.group(1)))
+            except ValueError:
+                return None
+    # FIX: year must be a capture group (was missing → IndexError)
+    m = re.match(r"(\d{1,2})(?:st|nd|rd|th)?\s+([A-Za-z]+)\s+(\d{4})$", s)
     if m:
-        return date(int(m.group(3)), MONTHS[m.group(2)[:3].lower()], int(m.group(1)))
+        mon = MONTHS.get(m.group(2)[:3].lower())
+        if mon:
+            try:
+                return date(int(m.group(3)), mon, int(m.group(1)))
+            except ValueError:
+                return None
     return None
 
 
@@ -116,45 +120,35 @@ def _norm_unit(u: str) -> str:
 
 
 def extract_dose(line: str) -> str:
-    """Prefer gold-compatible dose strings."""
     is_inh = bool(re.search(r"\bInh\.?\b|inhal", line, re.I))
 
-    # 1) Inhalers: prefer "N puffs" over mcg strength in parentheses
     if is_inh:
         pm = PUFF_RE.search(line)
         if pm:
             n = pm.group(1)
             return f"{n} puffs" if n != "1" else "1 puff"
-        # "2 puffs" sometimes written as "2puffs"
         pm = re.search(r"(\d+)\s*puff", line, re.I)
         if pm:
             n = pm.group(1)
             return f"{n} puffs" if n != "1" else "1 puff"
 
-    # 2) Explicit unit dose (first match outside parentheses preferred)
-    #    Strip parenthetical strengths for primary search, keep as fallback
     no_paren = re.sub(r"\([^)]*\)", " ", line)
     m = DOSE_UNIT_RE.search(no_paren)
     if m:
         return f"{m.group(1)} {_norm_unit(m.group(2))}"
 
-    # 3) Half tablet
     m = HALF_RE.search(line)
     if m:
         return f"{m.group(1)} tab"
 
-    # 4) "1 tab" quantity (IFA style)
     m = TAB_QTY_RE.search(no_paren)
     if m:
         return f"{m.group(1)} tab"
 
-    # 5) Slot doses (10-0-10)
     m = SLOT_RE.search(line)
     if m:
         return m.group(1).replace(" ", "") + (f" {m.group(2)}" if m.group(2) else "")
 
-    # 6) Brand trailing number → assume mg (Flagyl 400, Calpol 650, Aldactone 25)
-    #    Avoid matching durations / frequencies already handled
     m = re.search(
         r"(?:Tab\.?|T\.?|Cap\.?|Inj\.?|Syp\.?)\s+[A-Za-z][A-Za-z0-9+\-]*\s+(\d+(?:\.\d+)?)\b",
         no_paren,
@@ -162,7 +156,6 @@ def extract_dose(line: str) -> str:
     )
     if m:
         val = m.group(1)
-        # Heuristic: typical tablet mg strengths
         try:
             num = float(val)
             if 0.5 <= num <= 2000:
@@ -170,7 +163,6 @@ def extract_dose(line: str) -> str:
         except ValueError:
             pass
 
-    # 7) Fallback: unit dose inside parentheses (component strength)
     m = DOSE_UNIT_RE.search(line)
     if m:
         return f"{m.group(1)} {_norm_unit(m.group(2))}"
@@ -182,17 +174,13 @@ def parse_med_line(line: str) -> dict:
     original = line
     line = re.sub(r"^\s*(\d+[.)]|[-•*])\s*", "", line).strip()
 
-    # Name: stop before standalone dose patterns, but keep brand numbers in name
-    # then we still extract dose separately
     name = line
-    # Truncate name at frequency / duration keywords for cleanliness
     name = re.split(
         r"\s+(?:PO|OD|BD|TDS|QID|HS|SOS|PRN|PC|AC|x\s*\d|for\s+\d|till|lifelong|life long)",
         name,
         maxsplit=1,
         flags=re.I,
     )[0].strip(" -:,")
-    # If name still has trailing pure dose "... 500 mg", strip unit dose from end for name
     name_clean = re.sub(
         r"\s+\d+(?:\.\d+)?\s*(?:mg|mcg|µg|ug|ml|puffs?|tabs?|tab)\s*$",
         "",
@@ -233,7 +221,10 @@ def extract_follow_ups(lines):
     for ln in section(lines, FU_HEADINGS):
         purpose = re.sub(r"^\s*[-•*]\s*", "", ln).strip()
         for ds in DATE_RE.findall(ln):
-            d = parse_date(ds)
+            try:
+                d = parse_date(ds)
+            except Exception:
+                d = None
             if d:
                 add(d, purpose)
 
@@ -243,7 +234,10 @@ def extract_follow_ups(lines):
             continue
         purpose = re.sub(r"^\s*[-•*]\s*", "", ln).strip()
         for ds in DATE_RE.findall(ln):
-            d = parse_date(ds)
+            try:
+                d = parse_date(ds)
+            except Exception:
+                d = None
             if d:
                 add(d, purpose)
     return fus
@@ -262,7 +256,6 @@ def extract(text):
             if cells[0] in ("No", "") or len(cells) < 6:
                 continue
             dose_cell = cells[2]
-            # If table dose empty, try recover from name cell
             dose = extract_dose(f"{cells[1]} {dose_cell}") if dose_cell else extract_dose(cells[1])
             if not dose and dose_cell:
                 dose = dose_cell
@@ -385,7 +378,11 @@ def main():
             if sid not in ids:
                 continue
             text = row.get("text") or row.get("summary") or row.get("discharge_summary") or ""
-            cp = extract(text)
+            try:
+                cp = extract(text)
+            except Exception as e:
+                print(f"WARN extract failed for {sid}: {e}")
+                cp = dict(medicines=[], stop_medicines=[], warning_signs=[], diet=[], activity=[], follow_ups=[])
             pred = {
                 "summary_id": sid,
                 "care_plan": cp,
