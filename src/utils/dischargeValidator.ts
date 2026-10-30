@@ -1,5 +1,9 @@
+/** Unified clinical / faithfulness acceptance threshold (0–1). Score must be ≥ this to pass. */
+export const CLINICAL_VALIDATION_THRESHOLD = 0.8;
+
 export interface ClinicalValidationResult {
   isValid: boolean;
+  /** Normalized score in 0–1 range */
   score: number;
   matchedCategories: string[];
   missingElements: string[];
@@ -11,6 +15,7 @@ export interface ClinicalValidationResult {
  * Strict clinical validation engine:
  * Evaluates whether an uploaded document is a genuine hospital clinical discharge summary.
  * Rejects non-medical files, invoices, receipts, code, resumes, recipes, or random documents.
+ * Pass criterion: normalized score ≥ CLINICAL_VALIDATION_THRESHOLD (0.8).
  */
 export function validateDischargeSummary(text: string, fileName: string = ''): ClinicalValidationResult {
   const clean = (text || '').toLowerCase();
@@ -73,22 +78,23 @@ export function validateDischargeSummary(text: string, fileName: string = ''): C
   if (hasRejection && matchedSettings.length === 0 && matchedClinical.length < 2) {
     return {
       isValid: false,
-      score: 5,
+      score: 0.05,
       matchedCategories: [],
       missingElements: ['Document appears to be non-clinical (invoice, code, resume, etc.).'],
       rejectionReason: 'This file does not appear to be a hospital discharge summary.',
     };
   }
 
-  const score =
+  const rawScore =
     matchedSettings.length * 12 +
     matchedClinical.length * 8 +
     matchedMeds.length * 6 +
     matchedFollowUp.length * 5 +
     matchedWarnings.length * 5;
 
-  const finalScore = Math.min(100, score);
-  const isValid = finalScore >= 35 && matchedSettings.length >= 1;
+  // Normalize to 0–1; pass only when score ≥ CLINICAL_VALIDATION_THRESHOLD (0.8)
+  const finalScore = Math.min(1, rawScore / 100);
+  const isValid = finalScore >= CLINICAL_VALIDATION_THRESHOLD && matchedSettings.length >= 1;
 
   let specialty: ClinicalValidationResult['detectedSpecialty'] = 'General Clinical';
   if (clean.includes('stemi') || clean.includes('myocardial') || clean.includes('cardiac')) {
