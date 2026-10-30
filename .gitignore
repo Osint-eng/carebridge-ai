@@ -1,39 +1,14 @@
-# Dependencies
-node_modules/
-.pnp
-.pnp.js
-
-# Build
-dist/
-dist-ssr/
-*.local
-
-# Editor
-.vscode/*
-!.vscode/extensions.json
-.idea
+node_modules
+dist
 .DS_Store
-*.suo
-*.ntvs*
-*.njsproj
-*.sln
-*.sw?
-
-# Env
+*.local
 .env
-.env.local
-.env.*.local
-*.env
-
-# Logs
-logs
-*.log
-npm-debug.log*
-yarn-debug.log*
-yarn-error.log*
-pnpm-debug.log*
-lerna-debug.log*
-
-# Vite
-.vite/
+.env.*
+!.env.example
 .vercel
+coverage
+*.log
+.turbo
+.cache
+submission/H2_predictions.jsonl
+data/h2/summaries.jsonl
