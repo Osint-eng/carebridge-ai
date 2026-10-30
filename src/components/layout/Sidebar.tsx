@@ -21,7 +21,7 @@ import {
   ClipboardList,
 } from 'lucide-react';
 import { useAuth } from '@/context/AuthContext';
-import { useDocuments } from '@/context/DocumentContext';
+import { useDocument } from '@/context/DocumentContext';
 import { getNavForRole, roleTheme, type NavItemDef } from '@/lib/roleNav';
 
 const ICONS: Record<NavItemDef['iconName'], React.ComponentType<{ className?: string }>> = {
@@ -45,7 +45,7 @@ const ICONS: Record<NavItemDef['iconName'], React.ComponentType<{ className?: st
 
 export const Sidebar: React.FC = () => {
   const { profile, logout } = useAuth();
-  const { currentDoc } = useDocuments();
+  const { currentDoc } = useDocument();
   const navigate = useNavigate();
   const theme = roleTheme(profile?.role);
   const navItems = getNavForRole(profile?.role);
