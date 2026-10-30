@@ -59,6 +59,10 @@ function sourceContains(source: string, fragment: string): boolean {
   return src.includes(frag) || frag.split(' ').every((t) => !t || src.includes(t));
 }
 
+// Single-line regex — multiline /.../ literals break esbuild/Vite
+const MED_REGEX =
+  /(?:^|\n)\s*(?:\d+[.)]|[-•*])?\s*([A-Za-z][A-Za-z0-9\s.\/-]{1,40}?)\s+((?:\d+(?:\.\d+)?|½|1\/2)\s*(?:mg|mcg|units?|U|IU|ml|mL|tabs?|tab|puffs?)|\d+(?:\.\d+)?\s*-\s*\d+(?:\.\d+)?\s*-\s*\d+(?:\.\d+)?\s*(?:units?|U)?)\s*(oral|subcutaneous|intravenous|IV|SC|PO)?\s*(once\s+(?:a\s+)?(?:day|daily)|twice\s+(?:a\s+)?(?:day|daily)|thrice\s+(?:a\s+)?(?:day|daily)|three\s+times\s+(?:a\s+)?(?:day|daily)|at\s+bedtime|with\s+meals|OD|BD|TDS|QID|HS|SOS|PRN|[½1\/2\d]\s*-\s*[½1\/2\d]\s*-\s*[½1\/2\d]|\d-\d-\d)?\s*(for\s+\d+\s+\w+|indefinitely|lifelong|x\s*\d+\s*(?:days?|weeks?|months?))?/gim;
+
 export const DocumentProvider: React.FC<{ children: React.ReactNode }> = ({ children }) => {
   const { user } = useAuth();
   const [documents, setDocuments] = useState<DischargeDocument[]>(() => {
@@ -154,18 +158,9 @@ export const DocumentProvider: React.FC<{ children: React.ReactNode }> = ({ chil
     const text = doc.extractedData.rawText;
     const meds: MedicationItem[] = [];
 
-    const medRegex =
-      /(?:^|\n)\s*(?:\d+[.)]|[-•*])?\s*([A-Za-z][A-Za-z0-9\s.\/-]{1,40}?)\s+(
-        (?:\d+(?:\.\d+)?|½|1\/2)\s*(?:mg|mcg|units?|U|IU|ml|mL|tabs?|tab|puffs?)|
-        \d+(?:\.\d+)?\s*-\s*\d+(?:\.\d+)?\s*-\s*\d+(?:\.\d+)?\s*(?:units?|U)?
-      )\s*(oral|subcutaneous|intravenous|IV|SC|PO)?\s*(
-        once\s+(?:a\s+)?(?:day|daily)|twice\s+(?:a\s+)?(?:day|daily)|thrice\s+(?:a\s+)?(?:day|daily)|
-        three\s+times\s+(?:a\s+)?(?:day|daily)|at\s+bedtime|with\s+meals|OD|BD|TDS|QID|HS|SOS|PRN|
-        [½1\/2\d]\s*-\s*[½1\/2\d]\s*-\s*[½1\/2\d]|\d-\d-\d
-      )?\s*(for\s+\d+\s+\w+|indefinitely|lifelong|x\s*\d+\s*(?:days?|weeks?|months?))?/gim;
-
     let m: RegExpExecArray | null;
     const seen = new Set<string>();
+    const medRegex = new RegExp(MED_REGEX.source, MED_REGEX.flags);
     while ((m = medRegex.exec(text)) !== null) {
       const name = m[1].trim().replace(/\s+/g, ' ');
       const key = normalize(name);
@@ -266,7 +261,6 @@ export const DocumentProvider: React.FC<{ children: React.ReactNode }> = ({ chil
     return plan;
   };
 
-  /** Real source-vs-care-plan comparison. Fails on altered dose / frequency / duration / follow-up. */
   const runFaithfulnessCheck = async (
     docId: string,
     introduceTestError = false,
@@ -499,38 +493,34 @@ export const DocumentProvider: React.FC<{ children: React.ReactNode }> = ({ chil
   };
 
   const markTimetableItemCompleted = (dateKey: string, medId: string, completed: boolean) => {
-    const key = `${dateKey}_${medId}`;
+    const key = `${dateKey}::${medId}`;
     setTimetableChecklist((prev) => ({ ...prev, [key]: completed }));
   };
 
-  return (
-    <DocumentContext.Provider
-      value={{
-        documents,
-        currentDoc,
-        setCurrentDoc,
-        loadDocumentById,
-        uploadDocument,
-        loadSampleDocument,
-        runExtraction,
-        generateCarePlan,
-        runFaithfulnessCheck,
-        translateCarePlan,
-        calculateReadability,
-        deleteDocument,
-        markTimetableItemCompleted,
-        timetableChecklist,
-        isProcessing,
-        processingStage,
-      }}
-    >
-      {children}
-    </DocumentContext.Provider>
-  );
+  const value: DocumentContextType = {
+    documents,
+    currentDoc,
+    setCurrentDoc,
+    loadDocumentById,
+    uploadDocument,
+    loadSampleDocument,
+    runExtraction,
+    generateCarePlan,
+    runFaithfulnessCheck,
+    translateCarePlan,
+    calculateReadability,
+    deleteDocument,
+    markTimetableItemCompleted,
+    timetableChecklist,
+    isProcessing,
+    processingStage,
+  };
+
+  return <DocumentContext.Provider value={value}>{children}</DocumentContext.Provider>;
 };
 
-export const useDocuments = () => {
-  const context = useContext(DocumentContext);
-  if (!context) throw new Error('useDocuments must be used within DocumentProvider');
-  return context;
-};
+export function useDocument() {
+  const ctx = useContext(DocumentContext);
+  if (!ctx) throw new Error('useDocument must be used within DocumentProvider');
+  return ctx;
+}
