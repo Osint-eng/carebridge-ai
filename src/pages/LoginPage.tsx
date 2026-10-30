@@ -15,10 +15,22 @@ export const LoginPage: React.FC = () => {
     e.preventDefault();
     setError('');
     setLoading(true);
-    const result = await login(email, password);
-    setLoading(false);
-    if (result.error) setError(result.error);
-    else navigate('/dashboard');
+    try {
+      const result = await login(email.trim(), password);
+      if (result.error) {
+        setError(result.error);
+        return;
+      }
+      if (!result.user?.id || !result.user?.email) {
+        setError('Invalid email or password. No account found — please sign up first.');
+        return;
+      }
+      navigate('/dashboard');
+    } catch (err: any) {
+      setError(err?.message || 'Login failed. Please try again.');
+    } finally {
+      setLoading(false);
+    }
   };
 
   return (

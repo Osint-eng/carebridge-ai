@@ -25,13 +25,19 @@ export const FridgeSheetPage: React.FC = () => {
         <p className="text-sm text-center text-slate-600 mb-6">{currentDoc.fileName}</p>
 
         <h3 className="font-bold text-sm uppercase tracking-wide border-b-2 border-slate-800 pb-1 mb-3">Medications</h3>
-        <ul className="space-y-2 mb-6">
-          {currentDoc.carePlan.medications.map((m) => (
-            <li key={m.id} className="text-sm">
-              <strong>{m.name}</strong> — {m.dose}, {m.frequency}, {m.route}
-            </li>
-          ))}
-        </ul>
+        {currentDoc.carePlan.medications.length === 0 ? (
+          <p className="text-sm text-amber-700 mb-6">
+            No medicines were extracted for this plan. Go to <strong>My Care Plan</strong>, click <strong>Generate Care Plan</strong> again (extraction runs automatically), or load a sample from the dashboard.
+          </p>
+        ) : (
+          <ul className="space-y-2 mb-6">
+            {currentDoc.carePlan.medications.map((m) => (
+              <li key={m.id} className="text-sm">
+                <strong>{m.name}</strong> — {m.dose}, {m.frequency}, {m.route}
+              </li>
+            ))}
+          </ul>
+        )}
 
         {currentDoc.carePlan.warningSigns.length > 0 && (
           <>
