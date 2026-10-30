@@ -10,11 +10,15 @@ export const isSupabaseConfigured = Boolean(
     supabaseUrl.startsWith('http')
 );
 
-const LOCAL_USERS_KEY = 'carebridge_users_v2';
-const LOCAL_SESSION_KEY = 'carebridge_session_v2';
-const LOCAL_PENDING_MFA_KEY = 'carebridge_pending_mfa';
-const LEGACY_USERS_KEY = 'carebridge_users';
-const LEGACY_SESSION_KEY = 'carebridge_session';
+const LOCAL_USERS_KEY = 'carebridge_users_v3';
+const LOCAL_SESSION_KEY = 'carebridge_session_v3';
+const LEGACY_KEYS = [
+  'carebridge_users',
+  'carebridge_session',
+  'carebridge_users_v2',
+  'carebridge_session_v2',
+  'carebridge_pending_mfa',
+];
 
 const SESSION_TTL_MS = 24 * 60 * 60 * 1000;
 const MAX_FAILED_ATTEMPTS = 5;
@@ -66,9 +70,6 @@ interface StoredUser {
   preferred_language?: string;
   passwordHash: string;
   passwordSalt: string;
-  mfaEnabled: boolean;
-  mfaPinHash: string;
-  mfaPinSalt: string;
   failedAttempts: number;
   lockedUntil: number | null;
   created_at: string;
@@ -82,24 +83,19 @@ interface LocalSession {
   };
   access_token: string;
   expires_at: number;
-  mfa_verified: boolean;
 }
 
 class LocalAuthStorage {
   private listeners: ((event: string, session: any) => void)[] = [];
 
   constructor() {
-    this.migrateLegacyIfNeeded();
+    this.clearLegacy();
     this.purgeExpiredSession();
   }
 
-  private migrateLegacyIfNeeded() {
+  private clearLegacy() {
     try {
-      const legacy = localStorage.getItem(LEGACY_USERS_KEY);
-      if (legacy) {
-        localStorage.removeItem(LEGACY_USERS_KEY);
-        localStorage.removeItem(LEGACY_SESSION_KEY);
-      }
+      for (const k of LEGACY_KEYS) localStorage.removeItem(k);
     } catch {
       // ignore
     }
@@ -130,7 +126,7 @@ class LocalAuthStorage {
       const data = localStorage.getItem(LOCAL_SESSION_KEY);
       if (!data) return null;
       const session = JSON.parse(data) as LocalSession;
-      if (!session?.user?.id || !session.mfa_verified) return null;
+      if (!session?.user?.id) return null;
       if (session.expires_at < Date.now()) {
         localStorage.removeItem(LOCAL_SESSION_KEY);
         return null;
@@ -154,29 +150,6 @@ class LocalAuthStorage {
     this.listeners.forEach((listener) => listener(event, session));
   }
 
-  private setPendingMfa(payload: { userId: string; email: string; expiresAt: number } | null) {
-    if (payload) {
-      localStorage.setItem(LOCAL_PENDING_MFA_KEY, JSON.stringify(payload));
-    } else {
-      localStorage.removeItem(LOCAL_PENDING_MFA_KEY);
-    }
-  }
-
-  private getPendingMfa(): { userId: string; email: string; expiresAt: number } | null {
-    try {
-      const raw = localStorage.getItem(LOCAL_PENDING_MFA_KEY);
-      if (!raw) return null;
-      const data = JSON.parse(raw);
-      if (!data?.userId || data.expiresAt < Date.now()) {
-        localStorage.removeItem(LOCAL_PENDING_MFA_KEY);
-        return null;
-      }
-      return data;
-    } catch {
-      return null;
-    }
-  }
-
   private buildPublicUser(u: StoredUser) {
     return {
       id: u.id,
@@ -186,7 +159,6 @@ class LocalAuthStorage {
         full_name: u.full_name,
         role: u.role,
         preferred_language: u.preferred_language || 'English',
-        mfa_enabled: String(u.mfaEnabled),
       },
     };
   }
@@ -203,13 +175,15 @@ class LocalAuthStorage {
     const trimmedEmail = normalizeEmail(email);
     const trimmedPassword = (password || '').trim();
     const fullName = (options?.data?.full_name || '').trim();
-    const mfaPin = String(options?.data?.mfa_pin || '').trim();
 
     if (!fullName) {
       return { data: { user: null, session: null }, error: { message: 'Please enter your full name.' } };
     }
     if (!trimmedEmail || !isValidEmail(trimmedEmail)) {
-      return { data: { user: null, session: null }, error: { message: 'Please enter a valid email address.' } };
+      return {
+        data: { user: null, session: null },
+        error: { message: 'Please enter a valid email address.' },
+      };
     }
     if (!trimmedPassword || trimmedPassword.length < 8) {
       return {
@@ -223,16 +197,9 @@ class LocalAuthStorage {
         error: { message: 'Password must include at least one letter and one number.' },
       };
     }
-    if (!/^\d{6}$/.test(mfaPin)) {
-      return {
-        data: { user: null, session: null },
-        error: { message: 'MFA PIN must be exactly 6 digits.' },
-      };
-    }
 
     const users = this.readUsers();
-    const existing = users.find((u) => u.email === trimmedEmail);
-    if (existing) {
+    if (users.find((u) => u.email === trimmedEmail)) {
       return {
         data: { user: null, session: null },
         error: { message: 'An account with this email already exists.' },
@@ -240,9 +207,7 @@ class LocalAuthStorage {
     }
 
     const passwordSalt = randomSalt();
-    const mfaPinSalt = randomSalt();
     const passwordHash = await hashPassword(trimmedPassword, passwordSalt);
-    const mfaPinHash = await hashPassword(mfaPin, mfaPinSalt);
 
     const stored: StoredUser = {
       id: crypto.randomUUID(),
@@ -252,9 +217,6 @@ class LocalAuthStorage {
       preferred_language: options?.data?.preferred_language || 'English',
       passwordHash,
       passwordSalt,
-      mfaEnabled: true,
-      mfaPinHash,
-      mfaPinSalt,
       failedAttempts: 0,
       lockedUntil: null,
       created_at: new Date().toISOString(),
@@ -268,10 +230,8 @@ class LocalAuthStorage {
       user: publicUser,
       access_token: 'local-' + stored.id + '-' + randomSalt().slice(0, 8),
       expires_at: Date.now() + SESSION_TTL_MS,
-      mfa_verified: true,
     };
     this.writeSession(session);
-    this.setPendingMfa(null);
 
     return { data: { user: publicUser, session }, error: null };
   }
@@ -291,7 +251,6 @@ class LocalAuthStorage {
     }
 
     const users = this.readUsers();
-    // CRITICAL: look up by email first — never by password alone
     const accountIndex = users.findIndex((u) => u.email === trimmedEmail);
     if (accountIndex < 0) {
       return {
@@ -311,9 +270,7 @@ class LocalAuthStorage {
     }
 
     const candidateHash = await hashPassword(trimmedPassword, account.passwordSalt);
-    const passwordOk = candidateHash === account.passwordHash;
-
-    if (!passwordOk) {
+    if (candidateHash !== account.passwordHash) {
       account.failedAttempts = (account.failedAttempts || 0) + 1;
       if (account.failedAttempts >= MAX_FAILED_ATTEMPTS) {
         account.lockedUntil = Date.now() + LOCKOUT_MS;
@@ -332,80 +289,11 @@ class LocalAuthStorage {
     users[accountIndex] = account;
     this.writeUsers(users);
 
-    this.setPendingMfa({
-      userId: account.id,
-      email: account.email,
-      expiresAt: Date.now() + 10 * 60 * 1000,
-    });
-    this.writeSession(null);
-
-    return {
-      data: {
-        user: null,
-        session: null,
-        requiresMfa: true,
-        email: account.email,
-      },
-      error: null,
-    };
-  }
-
-  async verifyMfa({ pin }: { pin: string }) {
-    const pending = this.getPendingMfa();
-    if (!pending) {
-      return {
-        data: { user: null, session: null },
-        error: { message: 'MFA session expired. Please sign in again.' },
-      };
-    }
-
-    const pinTrimmed = String(pin || '').trim();
-    if (!/^\d{6}$/.test(pinTrimmed)) {
-      return {
-        data: { user: null, session: null },
-        error: { message: 'Enter your 6-digit MFA PIN.' },
-      };
-    }
-
-    const users = this.readUsers();
-    const accountIndex = users.findIndex((u) => u.id === pending.userId && u.email === pending.email);
-    if (accountIndex < 0) {
-      this.setPendingMfa(null);
-      return {
-        data: { user: null, session: null },
-        error: { message: 'Account not found. Please sign in again.' },
-      };
-    }
-
-    const account = users[accountIndex];
-    const pinHash = await hashPassword(pinTrimmed, account.mfaPinSalt);
-    if (pinHash !== account.mfaPinHash) {
-      account.failedAttempts = (account.failedAttempts || 0) + 1;
-      if (account.failedAttempts >= MAX_FAILED_ATTEMPTS) {
-        account.lockedUntil = Date.now() + LOCKOUT_MS;
-        account.failedAttempts = 0;
-        this.setPendingMfa(null);
-      }
-      users[accountIndex] = account;
-      this.writeUsers(users);
-      return {
-        data: { user: null, session: null },
-        error: { message: 'Invalid MFA PIN.' },
-      };
-    }
-
-    account.failedAttempts = 0;
-    account.lockedUntil = null;
-    users[accountIndex] = account;
-    this.writeUsers(users);
-    this.setPendingMfa(null);
-
     const publicUser = this.buildPublicUser(account);
     const session: LocalSession = {
       user: publicUser,
       access_token: 'local-' + account.id + '-' + randomSalt().slice(0, 8),
       expires_at: Date.now() + SESSION_TTL_MS,
-      mfa_verified: true,
     };
     this.writeSession(session);
 
@@ -413,7 +301,6 @@ class LocalAuthStorage {
   }
 
   async signOut() {
-    this.setPendingMfa(null);
     this.writeSession(null);
     return { error: null };
   }
@@ -445,11 +332,7 @@ class LocalAuthStorage {
     this.writeUsers(users);
 
     const publicUser = this.buildPublicUser(account);
-    const nextSession: LocalSession = {
-      ...session,
-      user: publicUser,
-    };
-    this.writeSession(nextSession);
+    this.writeSession({ ...session, user: publicUser });
     return { data: { user: publicUser }, error: null };
   }
 
@@ -476,7 +359,6 @@ if (!isSupabaseConfigured || !supabase) {
     auth: {
       signUp: localAuth.signUp.bind(localAuth),
       signInWithPassword: localAuth.signInWithPassword.bind(localAuth),
-      verifyMfa: localAuth.verifyMfa.bind(localAuth),
       signOut: localAuth.signOut.bind(localAuth),
       getSession: localAuth.getSession.bind(localAuth),
       getUser: localAuth.getUser.bind(localAuth),
