@@ -10,5 +10,10 @@ coverage
 *.log
 .turbo
 .cache
+
+# H2 challenge – large / generated artefacts
 submission/H2_predictions.jsonl
+submission/*_score.json
+submission/dev_*.jsonl
 data/h2/summaries.jsonl
+data/h2/summaries_txt/
