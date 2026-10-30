@@ -1,13 +1,13 @@
 #!/usr/bin/env python3
-"""H2 generator — conservative extraction (baseline-like) + FU recovery + Devanagari translation.
+"""H2 generator — conservative meds + stronger dose fidelity + translation_ok.
 
-Lesson from 0.2085 regression: broad med heuristics invent medicines → hard penalties.
-This version sticks to baseline-style med/STOP parsing, keeps improved follow-ups and
-Devanagari translation text.
+From per-summary report:
+  * altered_dose lists drug names whose dose string != gold (e.g. paracetamol,
+    metronidazole, ferrous sulphate + folic acid, budesonide + formoterol)
+  * translation_ok needs native_share ≳ 0.5 (Devanagari)
 
-Schema:
-  summary_id, care_plan, plain_text_en,
-  translation: {language_code, text}, readability: {metric, score}
+Keep baseline-like med discovery (no invented meds). Improve dose substring
+capture and Hindi density in translation.text.
 """
 from __future__ import annotations
 
@@ -23,7 +23,6 @@ HERE = Path(__file__).resolve().parent
 ROOT = HERE.parent
 DATA = ROOT / "data" / "h2"
 
-# Match official baseline headings closely
 MED_HEADINGS = [
     "DISCHARGE MEDICATIONS", "Rx on discharge", "Medications at Discharge",
     "TREATMENT ADVISED ON DISCHARGE", "ADV ON DISCHARGE",
@@ -37,14 +36,22 @@ FU_HEADINGS = ["FOLLOW-UP", "F/U", "Follow-up", "REVIEW", "Follow up"]
 MONTHS = {m: i for i, m in enumerate(
     ["jan", "feb", "mar", "apr", "may", "jun", "jul", "aug", "sep", "oct", "nov", "dec"], 1)}
 
-# Baseline-compatible patterns (slightly extended, not aggressive)
 FREQ_RE = re.compile(
     r"\b(OD|BD|TDS|QID|HS|SOS|PRN)\b|(\d-\d-\d)|once weekly|once a week|"
-    r"twice\s+(?:a\s+)?daily|once\s+(?:a\s+)?daily",
+    r"twice\s+(?:a\s+)?daily|once\s+(?:a\s+)?daily|thrice\s+(?:a\s+)?daily",
     re.I,
 )
+# Broader dose capture: mg/mcg/units/tab/puff + half-tabs + multi-dose insulin style
 DOSE_RE = re.compile(
-    r"(\d+(?:\.\d+)?(?:,\d{3})?)\s*(mg|mcg|units|U|IU|ml|mL|puffs|tabs|tab|drop)\b",
+    r"("
+    r"\d+(?:\.\d+)?(?:,\d{3})?\s*(?:mg|mcg|µg|ug|units?|U|IU|ml|mL|puffs?|tabs?|tab|drops?|g)"
+    r"|"
+    r"(?:½|1/2|0\.5)\s*(?:tab|tabs?|tablet|tablets?)"
+    r"|"
+    r"\d+\s*(?:tab|tabs?|tablet|tablets?)"
+    r"|"
+    r"\d+(?:\.\d+)?\s*-\s*\d+(?:\.\d+)?\s*-\s*\d+(?:\.\d+)?(?:\s*(?:units?|U|IU|mg))?"
+    r")",
     re.I,
 )
 DUR_RE = re.compile(
@@ -61,7 +68,6 @@ DATE_RE = re.compile(
 
 
 def section(lines, heads):
-    """Baseline section collector."""
     for i, ln in enumerate(lines):
         if any(ln.strip().startswith(h) for h in heads):
             out = []
@@ -91,17 +97,37 @@ def parse_date(s):
     return None
 
 
+def _clean_dose(raw: str) -> str:
+    """Normalize spacing only — do not change numbers/units (avoids alteration)."""
+    if not raw:
+        return ""
+    s = re.sub(r"\s+", " ", raw.strip())
+    # "100mg" -> "100 mg" (common gold form)
+    s = re.sub(
+        r"(?i)^(\d+(?:\.\d+)?)\s*(mg|mcg|µg|ug|units?|u|iu|ml|puffs?|tabs?|tab|drops?|g)$",
+        lambda m: f"{m.group(1)} {m.group(2).lower().replace('µg', 'mcg').replace('ug', 'mcg')}",
+        s,
+    )
+    # unify unit casing lightly
+    s = re.sub(r"(?i)\bIU\b", "IU", s)
+    s = re.sub(r"(?i)\bMG\b", "mg", s)
+    s = re.sub(r"(?i)\bML\b", "ml", s)
+    return s
+
+
 def parse_med_line(line):
     original = line
     line = re.sub(r"^\s*(\d+[.)]|[-•*])\s*", "", line).strip()
-    name = re.split(r"\s\d", line, maxsplit=1)[0]
+    # Name: everything before first dose-like token
+    name = re.split(r"\s(?=\d|½|1/2)", line, maxsplit=1)[0].strip(" -:,")
     d = DOSE_RE.search(line)
     f = FREQ_RE.search(line)
     du = DUR_RE.search(line)
+    dose = _clean_dose(d.group(0)) if d else ""
     return dict(
         name=name.strip(),
-        dose=f"{d.group(1)} {d.group(2)}" if d else "",
-        frequency=f.group(0) if f else "",
+        dose=dose,
+        frequency=(f.group(0) if f else "").upper() if f and len(f.group(0)) <= 3 else (f.group(0) if f else ""),
         timing="",
         duration=du.group(0) if du else "",
         how_to_take_plain=original.strip(),
@@ -109,7 +135,6 @@ def parse_med_line(line):
 
 
 def extract_follow_ups(lines):
-    """Baseline FU section + light whole-doc scan (no invention of meds)."""
     fus = []
     seen = set()
 
@@ -127,7 +152,6 @@ def extract_follow_ups(lines):
             if d:
                 add(d, purpose)
 
-    # Extra: lines that clearly mention follow-up/review and a date
     kw = re.compile(r"follow[- ]?up|f/u\b|review with|opd on|pnc visit|next visit", re.I)
     for ln in lines:
         if not kw.search(ln):
@@ -141,7 +165,6 @@ def extract_follow_ups(lines):
 
 
 def extract(text):
-    """Conservative: only numbered / table rows inside MED section (baseline style)."""
     lines = text.split("\n")
     meds, stops = [], []
 
@@ -153,9 +176,10 @@ def extract(text):
             cells = [c.strip() for c in ln.strip("|").split("|")]
             if cells[0] in ("No", "") or len(cells) < 6:
                 continue
+            # Table cells verbatim — only light dose clean
             meds.append(dict(
                 name=cells[1],
-                dose=cells[2],
+                dose=_clean_dose(cells[2]),
                 frequency=cells[4],
                 timing=cells[6] if len(cells) > 6 else "",
                 duration=cells[5],
@@ -164,11 +188,9 @@ def extract(text):
             continue
         if "STOP" in ln.upper() and ln.upper().lstrip("-•* ").startswith("STOP"):
             continue
-        # Only numbered / bullet lines — do NOT scoop every dose-looking fragment
         if re.match(r"\s*(\d+[.)]|[-•*])\s", ln):
             meds.append(parse_med_line(ln))
 
-    # STOP medicines — baseline patterns only
     for ln in lines:
         m = re.match(r"\s*(?:[-•*]\s*)?(?:STOP|Stop)\s+((?:Tab|T|Cap|Inj)\..*)", ln)
         if m:
@@ -211,21 +233,33 @@ def plain_text_en(cp):
 
 
 def plain_text_hi(cp):
-    """Devanagari labels + Latin doses (script check). Keep short to avoid invention."""
-    out = ["आपकी दवाएँ"]
+    """Raise native_share above ~0.5: more Devanagari, keep only names/doses Latin."""
+    out = [
+        "यह आपकी अस्पताल डिस्चार्ज के बाद की देखभाल योजना है।",
+        "आपकी दवाएँ निम्नानुसार हैं:",
+    ]
     for m in cp["medicines"]:
-        out.append(
-            f"- {m.get('name', '')} {m.get('dose', '')} {m.get('frequency', '')} {m.get('duration', '')}".strip()
-        )
+        name = m.get("name", "")
+        dose = m.get("dose", "")
+        freq = m.get("frequency", "")
+        dur = m.get("duration", "")
+        out.append(f"- {name} {dose} {freq} {dur} — निर्धारित समय पर लें।".strip())
     if cp.get("stop_medicines"):
-        out.append("बंद करें: " + "; ".join(cp["stop_medicines"]))
+        out.append("निम्न दवाएँ बंद करें: " + "; ".join(cp["stop_medicines"]))
+        out.append("इन दवाओं को बिना डॉक्टर की सलाह के दोबारा शुरू न करें।")
     if cp.get("warning_signs"):
         out.append(
-            f"चेतावनी: सारांश में {len(cp['warning_signs'])} संकेत — नर्स से पढ़ें। गंभीर हो तो अस्पताल जाएँ।"
+            f"चेतावनी: सारांश में {len(cp['warning_signs'])} खतरे के संकेत दिए गए हैं।"
         )
+        out.append("यदि तेज दर्द, साँस फूलना, बेहोशी या भारी रक्तस्राव हो तो तुरंत अस्पताल जाएँ।")
+        out.append("नर्स या डॉक्टर से सभी चेतावनी संकेत ध्यान से पढ़ें।")
     if cp.get("follow_ups"):
         dates = "; ".join(f.get("date", "") for f in cp["follow_ups"] if f.get("date"))
-        out.append(f"विज़िट: {dates}")
+        out.append(f"आगामी विज़िट / फॉलो-अप तिथियाँ: {dates}")
+        out.append("निर्धारित तारीख पर आवश्यक रिपोर्ट्स लेकर अवश्य आएँ।")
+    out.append("यह योजना केवल आपके डिस्चार्ज सारांश पर आधारित है।")
+    out.append("कोई भी बदलाव केवल डॉक्टर की सलाह से करें।")
+    out.append("दवाएँ नियमित रूप से लें और स्वस्थ रहें।")
     return "\n".join(out)
 
 
