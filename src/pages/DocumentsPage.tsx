@@ -1,10 +1,10 @@
 import React from 'react';
-import { useDocuments } from '@/context/DocumentContext';
+import { useDocument } from '@/context/DocumentContext';
 import { useNavigate } from 'react-router-dom';
 import { FileText, Trash2 } from 'lucide-react';
 
 export const DocumentsPage: React.FC = () => {
-  const { documents, setCurrentDoc, deleteDocument } = useDocuments();
+  const { documents, setCurrentDoc, deleteDocument } = useDocument();
   const navigate = useNavigate();
 
   return (
