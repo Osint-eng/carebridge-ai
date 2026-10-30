@@ -1,6 +1,6 @@
 import React from 'react';
 import { Link } from 'react-router-dom';
-import { useDocuments } from '@/context/DocumentContext';
+import { useDocument } from '@/context/DocumentContext';
 import { useAuth } from '@/context/AuthContext';
 import { roleTheme } from '@/lib/roleNav';
 import {
@@ -9,7 +9,7 @@ import {
 } from 'lucide-react';
 
 export const DashboardPage: React.FC = () => {
-  const { currentDoc, documents, loadSampleDocument, isProcessing, processingStage } = useDocuments();
+  const { currentDoc, documents, loadSampleDocument, isProcessing, processingStage } = useDocument();
   const { profile } = useAuth();
   const role = profile?.role || 'Patient';
   const theme = roleTheme(role);
