@@ -1,9 +1,9 @@
 import React from 'react';
-import { useDocuments } from '@/context/DocumentContext';
+import { useDocument } from '@/context/DocumentContext';
 import { useNavigate } from 'react-router-dom';
 
 export const ExtractionPage: React.FC = () => {
-  const { currentDoc, runExtraction, isProcessing, processingStage } = useDocuments();
+  const { currentDoc, runExtraction, isProcessing, processingStage } = useDocument();
   const navigate = useNavigate();
 
   const handleExtract = async () => {
