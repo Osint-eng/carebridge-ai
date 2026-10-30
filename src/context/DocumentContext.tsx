@@ -156,7 +156,6 @@ export const DocumentProvider: React.FC<{ children: React.ReactNode }> = ({ chil
       rawText: text,
     };
 
-    // simple diet/activity/warning extraction
     if (text.toLowerCase().includes('diet:')) {
       const dietMatch = text.match(/Diet:\s*([^\n]+)/i);
       if (dietMatch) extracted.dietInstructions.push(dietMatch[1].trim());
@@ -236,15 +235,27 @@ export const DocumentProvider: React.FC<{ children: React.ReactNode }> = ({ chil
         }]
       : [];
 
+    // Faithfulness pass threshold = 0.8 (80%). Any fatal mismatch fails.
+    const FAITHFULNESS_THRESHOLD = 0.8;
+    const checksTotal = 9;
+    const checksFailed = mismatches.length;
+    const checksPassed = checksTotal - checksFailed;
+    const scoreRatio = checksPassed / checksTotal;
+    const scorePercentage = Math.round(scoreRatio * 100);
+    const overallStatus =
+      mismatches.some((m) => m.isFatal) || scoreRatio < FAITHFULNESS_THRESHOLD
+        ? 'VALIDATION_FAILED'
+        : 'VERIFIED';
+
     const report: FaithfulnessReport = {
       id: crypto.randomUUID(),
       documentId: docId,
       evaluatedAt: new Date().toISOString(),
-      overallStatus: mismatches.length ? 'VALIDATION_FAILED' : 'VERIFIED',
-      scorePercentage: mismatches.length ? 70 : 100,
-      checksTotal: 9,
-      checksPassed: mismatches.length ? 8 : 9,
-      checksFailed: mismatches.length ? 1 : 0,
+      overallStatus,
+      scorePercentage,
+      checksTotal,
+      checksPassed,
+      checksFailed,
       mismatches,
       categoryScores: [
         { category: 'Medication', passed: true, accuracy: 100 },
