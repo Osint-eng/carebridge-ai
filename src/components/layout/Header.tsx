@@ -1,6 +1,6 @@
 import React, { useState } from 'react';
 import { useAuth } from '@/context/AuthContext';
-import { useDocuments } from '@/context/DocumentContext';
+import { useDocument } from '@/context/DocumentContext';
 import { useAccessibility } from '@/context/AccessibilityContext';
 import {
   ShieldCheck,
