@@ -47,19 +47,17 @@ ACT_HEADINGS = ["ACTIVITY", "Activity advice", "PHYSICAL ACTIVITY", "Exercise", 
 MONTHS = {m: i for i, m in enumerate(
     ["jan", "feb", "mar", "apr", "may", "jun", "jul", "aug", "sep", "oct", "nov", "dec"], 1)}
 
-# Dose: number + unit, half-tabs, multi-dose insulin style
 DOSE_RE = re.compile(
     r"(?:"
     r"(\d+(?:\.\d+)?(?:,\d{3})?)\s*(mg|mcg|units?|U|IU|ml|mL|puffs?|tabs?|tab|drops?)"
     r"|"
     r"(½|1/2|0\.5)\s*(tab|tabs?|tablet|tablets?)"
     r"|"
-    r"(\d+(?:\.\d+)?\s*-\s*\d+(?:\.\d+)?\s*-\s*\d+(?:\.\d+)?)\s*(units?|U|IU)?"  # 10-0-10
+    r"(\d+(?:\.\d+)?\s*-\s*\d+(?:\.\d+)?\s*-\s*\d+(?:\.\d+)?)\s*(units?|U|IU)?"
     r")",
     re.I,
 )
 
-# Frequency including 1-0-1 / ½-0-½ style and spelled forms
 FREQ_RE = re.compile(
     r"\b("
     r"OD|BD|TDS|QID|HS|SOS|PRN|"
@@ -69,7 +67,7 @@ FREQ_RE = re.compile(
     r"three\s+times\s+(?:a\s+)?(?:day|daily)|"
     r"four\s+times\s+(?:a\s+)?(?:day|daily)|"
     r"every\s+\d+\s+hours?|"
-    r"[½1/2\d]\s*-\s*[½1/2\d]\s*-\s*[½1/2\d]|"  # 1-0-1, ½-0-½
+    r"[½1/2\d]\s*-\s*[½1/2\d]\s*-\s*[½1/2\d]|"
     r"\d-\d-\d"
     r")\b",
     re.I,
@@ -268,7 +266,6 @@ def plain_text(cp: dict, translate: bool = False) -> str:
 
 
 def _pick_col(df: pd.DataFrame, candidates: list[str]) -> str:
-    """Return the first column name that exists (case-insensitive)."""
     lower = {c.lower(): c for c in df.columns}
     for cand in candidates:
         if cand.lower() in lower:
@@ -292,7 +289,7 @@ def main() -> None:
         raise FileNotFoundError(f"Missing {splits_path}. Run scripts/setup_h2_from_zip.sh first.")
 
     splits = pd.read_csv(splits_path)
-    id_col = _pick_col(splits, ["id", "summary_id", "Id", "ID", "sid"])
+    id_col = _pick_col(splits, ["summary_id", "id", "Id", "ID", "sid"])
     split_col = _pick_col(splits, ["split", "Split", "set", "partition"])
 
     if a.split != "all":
@@ -311,13 +308,14 @@ def main() -> None:
     with open(summaries_path, encoding="utf-8") as f, open(out, "w", encoding="utf-8") as g:
         for line in f:
             row = json.loads(line)
-            sid = str(row.get("id") or row.get("summary_id") or row.get("Id") or "")
+            sid = str(row.get("summary_id") or row.get("id") or row.get("Id") or "")
             if sid not in ids:
                 continue
             text = row.get("text") or row.get("summary") or row.get("discharge_summary") or ""
             cp = extract(text)
+            # Official scorer requires the key 'summary_id'
             pred = {
-                "id": sid,
+                "summary_id": sid,
                 "care_plan": cp,
                 "plain_text_en": plain_text(cp, translate=False),
                 "plain_text_translated": plain_text(cp, translate=True),
