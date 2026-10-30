@@ -1,13 +1,14 @@
 #!/usr/bin/env python3
-"""H2 generator — conservative meds + stronger dose fidelity + translation_ok.
+"""H2 generator — dose fidelity fix from gold comparisons.
 
-From per-summary report:
-  * altered_dose lists drug names whose dose string != gold (e.g. paracetamol,
-    metronidazole, ferrous sulphate + folic acid, budesonide + formoterol)
-  * translation_ok needs native_share ≳ 0.5 (Devanagari)
+Failure modes fixed:
+  * "T. Flagyl 400" / "T. Calpol 650" / "T. Aldactone 25" → dose is the
+    trailing number in mg (was left empty).
+  * "Inh. Salbutamol (100 mcg)" → gold wants "2 puffs", not strength 100 mcg.
+  * "Tab. IFA (Iron 60 mg + Folic acid 500 mcg)" → prefer 1 tab when written,
+    not the component strength alone.
 
-Keep baseline-like med discovery (no invented meds). Improve dose substring
-capture and Hindi density in translation.text.
+Still conservative on med discovery (no invented meds).
 """
 from __future__ import annotations
 
@@ -41,23 +42,29 @@ FREQ_RE = re.compile(
     r"twice\s+(?:a\s+)?daily|once\s+(?:a\s+)?daily|thrice\s+(?:a\s+)?daily",
     re.I,
 )
-# Broader dose capture: mg/mcg/units/tab/puff + half-tabs + multi-dose insulin style
-DOSE_RE = re.compile(
-    r"("
-    r"\d+(?:\.\d+)?(?:,\d{3})?\s*(?:mg|mcg|µg|ug|units?|U|IU|ml|mL|puffs?|tabs?|tab|drops?|g)"
-    r"|"
-    r"(?:½|1/2|0\.5)\s*(?:tab|tabs?|tablet|tablets?)"
-    r"|"
-    r"\d+\s*(?:tab|tabs?|tablet|tablets?)"
-    r"|"
-    r"\d+(?:\.\d+)?\s*-\s*\d+(?:\.\d+)?\s*-\s*\d+(?:\.\d+)?(?:\s*(?:units?|U|IU|mg))?"
-    r")",
+# Explicit unit doses
+DOSE_UNIT_RE = re.compile(
+    r"(\d+(?:\.\d+)?)\s*(mg|mcg|µg|ug|units?|U|IU|ml|mL|puffs?|tabs?|tab|tablets?|drops?|g)\b",
     re.I,
 )
+# Half tab
+HALF_RE = re.compile(r"(½|1/2|0\.5)\s*(tab|tabs?|tablet|tablets?)\b", re.I)
+# Multi-slot insulin style
+SLOT_RE = re.compile(r"(\d+(?:\.\d+)?\s*-\s*\d+(?:\.\d+)?\s*-\s*\d+(?:\.\d+)?)(?:\s*(units?|U|IU))?", re.I)
+# Brand trailing number without unit: "Flagyl 400", "Calpol 650", "Aldactone 25"
+BRAND_NUM_RE = re.compile(
+    r"\b(?:Tab\.?|T\.?|Cap\.?|Inj\.?|Inh\.?|Syp\.?)?\s*[A-Za-z][A-Za-z0-9+\- ]*?\s+(\d+(?:\.\d+)?)\b(?!\s*(?:mg|mcg|ug|µg|ml|puff|tab|unit|day|days|/))",
+    re.I,
+)
+# Puff count preferred for inhalers
+PUFF_RE = re.compile(r"(\d+)\s*puffs?\b", re.I)
+# "1 tab" style quantity
+TAB_QTY_RE = re.compile(r"\b(\d+)\s*(tab|tabs?|tablet|tablets?)\b", re.I)
+
 DUR_RE = re.compile(
     r"(x\s*\d+\s*(?:/\s*\d+|days?|wks?|weeks?|months?|yrs?|years?|d)\b|"
     r"for \d+ \w+|lifelong|life long|"
-    r"till (?:next )?review|till the next review|until the next visit|till next visit)",
+    r"till (?:next )?review|till the next review|until the next visit|till next visit|till review)",
     re.I,
 )
 DATE_RE = re.compile(
@@ -91,43 +98,121 @@ def parse_date(s):
     m = re.match(r"(\d{1,2})-([A-Za-z]{3})-(\d{2})$", s)
     if m:
         return date(2000 + int(m.group(3)), MONTHS[m.group(2).lower()], int(m.group(1)))
-    m = re.match(r"(\d{1,2})(?:st|nd|rd|th)?\s+([A-Za-z]+)\s+(\d{4})$", s)
+    m = re.match(r"(\d{1,2})(?:st|nd|rd|th)?\s+([A-Za-z]+)\s+\d{4}$", s)
     if m:
         return date(int(m.group(3)), MONTHS[m.group(2)[:3].lower()], int(m.group(1)))
     return None
 
 
-def _clean_dose(raw: str) -> str:
-    """Normalize spacing only — do not change numbers/units (avoids alteration)."""
-    if not raw:
-        return ""
-    s = re.sub(r"\s+", " ", raw.strip())
-    # "100mg" -> "100 mg" (common gold form)
-    s = re.sub(
-        r"(?i)^(\d+(?:\.\d+)?)\s*(mg|mcg|µg|ug|units?|u|iu|ml|puffs?|tabs?|tab|drops?|g)$",
-        lambda m: f"{m.group(1)} {m.group(2).lower().replace('µg', 'mcg').replace('ug', 'mcg')}",
-        s,
+def _norm_unit(u: str) -> str:
+    u = u.lower().strip()
+    u = {"µg": "mcg", "ug": "mcg", "u": "U", "tabs": "tab", "tablet": "tab",
+         "tablets": "tab", "puff": "puffs", "puffs": "puffs"}.get(u, u)
+    if u == "iu":
+        return "IU"
+    if u == "u":
+        return "U"
+    return u
+
+
+def extract_dose(line: str) -> str:
+    """Prefer gold-compatible dose strings."""
+    is_inh = bool(re.search(r"\bInh\.?\b|inhal", line, re.I))
+
+    # 1) Inhalers: prefer "N puffs" over mcg strength in parentheses
+    if is_inh:
+        pm = PUFF_RE.search(line)
+        if pm:
+            n = pm.group(1)
+            return f"{n} puffs" if n != "1" else "1 puff"
+        # "2 puffs" sometimes written as "2puffs"
+        pm = re.search(r"(\d+)\s*puff", line, re.I)
+        if pm:
+            n = pm.group(1)
+            return f"{n} puffs" if n != "1" else "1 puff"
+
+    # 2) Explicit unit dose (first match outside parentheses preferred)
+    #    Strip parenthetical strengths for primary search, keep as fallback
+    no_paren = re.sub(r"\([^)]*\)", " ", line)
+    m = DOSE_UNIT_RE.search(no_paren)
+    if m:
+        return f"{m.group(1)} {_norm_unit(m.group(2))}"
+
+    # 3) Half tablet
+    m = HALF_RE.search(line)
+    if m:
+        return f"{m.group(1)} tab"
+
+    # 4) "1 tab" quantity (IFA style)
+    m = TAB_QTY_RE.search(no_paren)
+    if m:
+        return f"{m.group(1)} tab"
+
+    # 5) Slot doses (10-0-10)
+    m = SLOT_RE.search(line)
+    if m:
+        return m.group(1).replace(" ", "") + (f" {m.group(2)}" if m.group(2) else "")
+
+    # 6) Brand trailing number → assume mg (Flagyl 400, Calpol 650, Aldactone 25)
+    #    Avoid matching durations / frequencies already handled
+    m = re.search(
+        r"(?:Tab\.?|T\.?|Cap\.?|Inj\.?|Syp\.?)\s+[A-Za-z][A-Za-z0-9+\-]*\s+(\d+(?:\.\d+)?)\b",
+        no_paren,
+        re.I,
     )
-    # unify unit casing lightly
-    s = re.sub(r"(?i)\bIU\b", "IU", s)
-    s = re.sub(r"(?i)\bMG\b", "mg", s)
-    s = re.sub(r"(?i)\bML\b", "ml", s)
-    return s
+    if m:
+        val = m.group(1)
+        # Heuristic: typical tablet mg strengths
+        try:
+            num = float(val)
+            if 0.5 <= num <= 2000:
+                return f"{val} mg"
+        except ValueError:
+            pass
+
+    # 7) Fallback: unit dose inside parentheses (component strength)
+    m = DOSE_UNIT_RE.search(line)
+    if m:
+        return f"{m.group(1)} {_norm_unit(m.group(2))}"
+
+    return ""
 
 
-def parse_med_line(line):
+def parse_med_line(line: str) -> dict:
     original = line
     line = re.sub(r"^\s*(\d+[.)]|[-•*])\s*", "", line).strip()
-    # Name: everything before first dose-like token
-    name = re.split(r"\s(?=\d|½|1/2)", line, maxsplit=1)[0].strip(" -:,")
-    d = DOSE_RE.search(line)
+
+    # Name: stop before standalone dose patterns, but keep brand numbers in name
+    # then we still extract dose separately
+    name = line
+    # Truncate name at frequency / duration keywords for cleanliness
+    name = re.split(
+        r"\s+(?:PO|OD|BD|TDS|QID|HS|SOS|PRN|PC|AC|x\s*\d|for\s+\d|till|lifelong|life long)",
+        name,
+        maxsplit=1,
+        flags=re.I,
+    )[0].strip(" -:,")
+    # If name still has trailing pure dose "... 500 mg", strip unit dose from end for name
+    name_clean = re.sub(
+        r"\s+\d+(?:\.\d+)?\s*(?:mg|mcg|µg|ug|ml|puffs?|tabs?|tab)\s*$",
+        "",
+        name,
+        flags=re.I,
+    ).strip()
+
+    dose = extract_dose(line)
     f = FREQ_RE.search(line)
     du = DUR_RE.search(line)
-    dose = _clean_dose(d.group(0)) if d else ""
+    freq = ""
+    if f:
+        freq = f.group(0)
+        if len(freq) <= 3:
+            freq = freq.upper()
+
     return dict(
-        name=name.strip(),
+        name=name_clean or name,
         dose=dose,
-        frequency=(f.group(0) if f else "").upper() if f and len(f.group(0)) <= 3 else (f.group(0) if f else ""),
+        frequency=freq,
         timing="",
         duration=du.group(0) if du else "",
         how_to_take_plain=original.strip(),
@@ -176,10 +261,14 @@ def extract(text):
             cells = [c.strip() for c in ln.strip("|").split("|")]
             if cells[0] in ("No", "") or len(cells) < 6:
                 continue
-            # Table cells verbatim — only light dose clean
+            dose_cell = cells[2]
+            # If table dose empty, try recover from name cell
+            dose = extract_dose(f"{cells[1]} {dose_cell}") if dose_cell else extract_dose(cells[1])
+            if not dose and dose_cell:
+                dose = dose_cell
             meds.append(dict(
                 name=cells[1],
-                dose=_clean_dose(cells[2]),
+                dose=dose,
                 frequency=cells[4],
                 timing=cells[6] if len(cells) > 6 else "",
                 duration=cells[5],
@@ -233,17 +322,14 @@ def plain_text_en(cp):
 
 
 def plain_text_hi(cp):
-    """Raise native_share above ~0.5: more Devanagari, keep only names/doses Latin."""
     out = [
         "यह आपकी अस्पताल डिस्चार्ज के बाद की देखभाल योजना है।",
         "आपकी दवाएँ निम्नानुसार हैं:",
     ]
     for m in cp["medicines"]:
-        name = m.get("name", "")
-        dose = m.get("dose", "")
-        freq = m.get("frequency", "")
-        dur = m.get("duration", "")
-        out.append(f"- {name} {dose} {freq} {dur} — निर्धारित समय पर लें।".strip())
+        out.append(
+            f"- {m.get('name', '')} {m.get('dose', '')} {m.get('frequency', '')} {m.get('duration', '')} — निर्धारित समय पर लें।".strip()
+        )
     if cp.get("stop_medicines"):
         out.append("निम्न दवाएँ बंद करें: " + "; ".join(cp["stop_medicines"]))
         out.append("इन दवाओं को बिना डॉक्टर की सलाह के दोबारा शुरू न करें।")
