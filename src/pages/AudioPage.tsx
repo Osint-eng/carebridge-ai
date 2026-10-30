@@ -5,11 +5,13 @@ import { AudioOrb3D } from '@/components/3d/AudioOrb3D';
 import { CameraRig } from '@/components/3d/CameraRig';
 import { Play, Square, Loader2 } from 'lucide-react';
 import {
-  playWithDaniel,
+  playWithRiya,
   isCartesiaConfigured,
   CARTESIA_QUALITY_THRESHOLD,
-  CARTESIA_DANIEL_VOICE_ID,
+  CARTESIA_RIYA_VOICE_ID,
   CARTESIA_MODEL_ID,
+  INDIC_VOICE_LANGUAGES,
+  type CartesiaLanguageCode,
 } from '@/lib/cartesia';
 
 export const AudioPage: React.FC = () => {
@@ -17,7 +19,11 @@ export const AudioPage: React.FC = () => {
   const [playing, setPlaying] = useState(false);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [language, setLanguage] = useState<CartesiaLanguageCode>('hi');
   const stopRef = useRef<(() => void) | null>(null);
+
+  const selectedLang =
+    INDIC_VOICE_LANGUAGES.find((l) => l.code === language) || INDIC_VOICE_LANGUAGES[0];
 
   const handlePlay = async () => {
     if (!currentDoc?.carePlan) return;
@@ -28,8 +34,22 @@ export const AudioPage: React.FC = () => {
       return;
     }
 
+    const translations = currentDoc.translations || {};
+    const langNameMap: Partial<Record<CartesiaLanguageCode, string>> = {
+      hi: 'Hindi',
+      te: 'Telugu',
+      ta: 'Tamil',
+      en: 'English',
+    };
+    const mapped = langNameMap[language];
+    const translatedSummary =
+      mapped && translations[mapped as keyof typeof translations]
+        ? (translations[mapped as keyof typeof translations] as { patientFriendlySummary?: string })
+            ?.patientFriendlySummary
+        : null;
+
     const text =
-      currentDoc.carePlan.patientFriendlySummary +
+      (translatedSummary || currentDoc.carePlan.patientFriendlySummary) +
       '. Medications: ' +
       currentDoc.carePlan.medications
         .map((m) => `${m.name}, ${m.dose}, ${m.frequency}`)
@@ -39,11 +59,10 @@ export const AudioPage: React.FC = () => {
     setPlaying(true);
 
     try {
-      // Stop any previous playback
       stopRef.current?.();
       stopRef.current = null;
 
-      const stop = await playWithDaniel(text, () => {
+      const stop = await playWithRiya(text, language, () => {
         setPlaying(false);
         stopRef.current = null;
       });
@@ -73,7 +92,7 @@ export const AudioPage: React.FC = () => {
       <div>
         <h1 className="text-2xl font-bold text-slate-900 dark:text-white">Audio Care Plan</h1>
         <p className="text-sm text-slate-500 mt-1">
-          Listen with Cartesia Daniel (Modern Assistant) · quality threshold {CARTESIA_QUALITY_THRESHOLD}
+          Cartesia Riya (Indian voice) · quality threshold {CARTESIA_QUALITY_THRESHOLD}
         </p>
       </div>
 
@@ -85,18 +104,42 @@ export const AudioPage: React.FC = () => {
         </Canvas>
       </div>
 
-      <div className="rounded-lg border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-800/50 px-4 py-3 text-xs text-slate-600 dark:text-slate-400 space-y-1">
-        <p>
-          <span className="font-semibold text-slate-800 dark:text-slate-200">Voice:</span> Daniel ·{' '}
-          {CARTESIA_DANIEL_VOICE_ID.slice(0, 8)}…
-        </p>
-        <p>
-          <span className="font-semibold text-slate-800 dark:text-slate-200">Model:</span> {CARTESIA_MODEL_ID}
-        </p>
-        <p>
-          <span className="font-semibold text-slate-800 dark:text-slate-200">Threshold:</span>{' '}
-          {CARTESIA_QUALITY_THRESHOLD} (pass only when quality ≥ this value)
-        </p>
+      <div className="rounded-lg border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-800/50 px-4 py-3 space-y-3">
+        <div>
+          <label className="text-xs font-medium text-slate-500 dark:text-slate-400">
+            Voice language
+          </label>
+          <select
+            value={language}
+            onChange={(e) => setLanguage(e.target.value as CartesiaLanguageCode)}
+            disabled={playing || loading}
+            className="mt-1 w-full bg-slate-100 dark:bg-slate-900 border border-slate-300 dark:border-slate-600 rounded-lg px-3 py-2 text-sm text-slate-900 dark:text-white focus:outline-none focus:border-sky-500"
+          >
+            {INDIC_VOICE_LANGUAGES.map((l) => (
+              <option key={l.code} value={l.code}>
+                {l.label} ({l.nativeLabel})
+              </option>
+            ))}
+          </select>
+        </div>
+        <div className="text-xs text-slate-600 dark:text-slate-400 space-y-1">
+          <p>
+            <span className="font-semibold text-slate-800 dark:text-slate-200">Voice:</span> Riya
+            (College Roommate) · {CARTESIA_RIYA_VOICE_ID.slice(0, 8)}…
+          </p>
+          <p>
+            <span className="font-semibold text-slate-800 dark:text-slate-200">Language:</span>{' '}
+            {selectedLang.label} ({selectedLang.nativeLabel}) · code <code>{language}</code>
+          </p>
+          <p>
+            <span className="font-semibold text-slate-800 dark:text-slate-200">Model:</span>{' '}
+            {CARTESIA_MODEL_ID}
+          </p>
+          <p>
+            <span className="font-semibold text-slate-800 dark:text-slate-200">Threshold:</span>{' '}
+            {CARTESIA_QUALITY_THRESHOLD} (pass only when quality ≥ this value)
+          </p>
+        </div>
       </div>
 
       {error && (
@@ -112,7 +155,7 @@ export const AudioPage: React.FC = () => {
           className="flex items-center gap-2 px-5 py-2.5 bg-sky-500 hover:bg-sky-400 text-white text-sm font-semibold rounded-lg disabled:opacity-50"
         >
           {loading ? <Loader2 className="w-4 h-4 animate-spin" /> : <Play className="w-4 h-4" />}
-          {loading ? 'Generating…' : 'Play (Daniel)'}
+          {loading ? 'Generating…' : `Play (Riya · ${selectedLang.label})`}
         </button>
         <button
           onClick={handleStop}
