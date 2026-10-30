@@ -1,9 +1,13 @@
 #!/usr/bin/env python3
-"""Improved H2 generator – starts from official baseline and hardens dose / frequency /
-duration / diet / activity extraction.
+"""Improved H2 generator – official submission schema:
 
-Official submission keys (from evaluate.py errors):
-  summary_id, care_plan, translation, (+ plain_text_en / language_code for text score)
+{
+  "summary_id": "...",
+  "care_plan": { medicines, stop_medicines, warning_signs, diet, activity, follow_ups },
+  "plain_text_en": "...",
+  "translation": { "language_code": "hi", "text": "..." },
+  "readability": { "metric": "none", "score": null }
+}
 
 Usage (from repo root):
     python evaluation/generate_submission.py --split dev  --out submission/dev_improved.jsonl
@@ -216,14 +220,18 @@ def extract(text: str) -> dict:
 HI_MAP = {
     "YOUR MEDICINES": "आपकी दवाएँ",
     "STOP THESE": "इन दवाओं को बंद करें",
+    "STOP these medicines:": "इन दवाओं को बंद करें:",
     "WARNING SIGNS - GO TO HOSPITAL": "चेतावनी संकेत – तुरंत अस्पताल जाएँ",
+    "WARNING SIGNS:": "चेतावनी संकेत:",
     "FOLLOW-UP": "फॉलो-अप",
+    "VISITS:": "विज़िट:",
     "DIET": "आहार",
     "ACTIVITY": "गतिविधि",
 }
 
 
 def plain_text(cp: dict, translate: bool = False) -> str:
+    """Build patient-facing plain text (English or light Hindi headings)."""
     out = []
     title = "YOUR MEDICINES"
     out.append(HI_MAP.get(title, title) if translate else title)
@@ -231,12 +239,12 @@ def plain_text(cp: dict, translate: bool = False) -> str:
         line = f"- {m.get('name', '')} {m.get('dose', '')} {m.get('frequency', '')} {m.get('duration', '')}".strip()
         out.append(line)
     if cp.get("stop_medicines"):
-        t = "STOP THESE"
+        t = "STOP these medicines:"
         out.append(HI_MAP.get(t, t) if translate else t)
         for s in cp["stop_medicines"]:
             out.append(f"- {s}")
     if cp.get("warning_signs"):
-        t = "WARNING SIGNS - GO TO HOSPITAL"
+        t = "WARNING SIGNS:"
         out.append(HI_MAP.get(t, t) if translate else t)
         for w in cp["warning_signs"]:
             out.append(f"- {w}")
@@ -251,7 +259,7 @@ def plain_text(cp: dict, translate: bool = False) -> str:
         for a in cp["activity"]:
             out.append(f"- {a}")
     if cp.get("follow_ups"):
-        t = "FOLLOW-UP"
+        t = "VISITS:"
         out.append(HI_MAP.get(t, t) if translate else t)
         for f in cp["follow_ups"]:
             out.append(f"- {f.get('date', '')} {f.get('purpose', '')}".strip())
@@ -308,14 +316,16 @@ def main() -> None:
             cp = extract(text)
             en = plain_text(cp, translate=False)
             hi = plain_text(cp, translate=True)
-            # Keys required by official evaluate.py (errors so far: summary_id, translation)
+            # Exact schema used by official baseline / evaluate.py
             pred = {
                 "summary_id": sid,
                 "care_plan": cp,
                 "plain_text_en": en,
-                "translation": hi,              # required by scorer
-                "plain_text_translated": hi,    # keep for compatibility
-                "language_code": "hi",
+                "translation": {
+                    "language_code": "hi",
+                    "text": hi,
+                },
+                "readability": {"metric": "none", "score": None},
             }
             g.write(json.dumps(pred, ensure_ascii=False) + "\n")
             n += 1
