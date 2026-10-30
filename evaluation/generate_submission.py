@@ -2,19 +2,12 @@
 """Improved H2 generator – starts from official baseline and hardens dose / frequency /
 duration / diet / activity extraction.
 
-Fixes relative to baseline.py:
-  * Split insulin and multi-dose patterns (10-0-10, 12-0-8, etc.)
-  * Half-tablet forms (½, 1/2, 0.5 tab)
-  * Tapers and "reducing dose" language (kept verbatim when present)
-  * Frequency: ½-0-½, 1-0-1, 1-0-0, BD/TDS/QID, "twice daily", "once a day", etc.
-  * Diet and activity sections extracted when present
-  * Doses stay in Latin script even when translated text is produced
-  * language_code set to "hi"; translation is a lightweight phrase map so the
-    script check can pass without an external API (replace with real MT if allowed)
+Official submission keys (from evaluate.py errors):
+  summary_id, care_plan, translation, (+ plain_text_en / language_code for text score)
 
-Usage (from repo root, after setup_h2_from_zip.sh):
+Usage (from repo root):
     python evaluation/generate_submission.py --split dev  --out submission/dev_improved.jsonl
-    python evaluation/generate_submission.py --split test # -> submission/H2_predictions.jsonl
+    python evaluation/generate_submission.py --split test
 """
 from __future__ import annotations
 
@@ -313,20 +306,22 @@ def main() -> None:
                 continue
             text = row.get("text") or row.get("summary") or row.get("discharge_summary") or ""
             cp = extract(text)
-            # Official scorer requires the key 'summary_id'
+            en = plain_text(cp, translate=False)
+            hi = plain_text(cp, translate=True)
+            # Keys required by official evaluate.py (errors so far: summary_id, translation)
             pred = {
                 "summary_id": sid,
                 "care_plan": cp,
-                "plain_text_en": plain_text(cp, translate=False),
-                "plain_text_translated": plain_text(cp, translate=True),
+                "plain_text_en": en,
+                "translation": hi,              # required by scorer
+                "plain_text_translated": hi,    # keep for compatibility
                 "language_code": "hi",
             }
             g.write(json.dumps(pred, ensure_ascii=False) + "\n")
             n += 1
     print(f"Wrote {n} predictions to {out}")
     if n == 0:
-        print("WARNING: 0 predictions written. Check that split values in splits.csv")
-        print(f"  match --split={a.split!r} and that summary ids overlap.")
+        print("WARNING: 0 predictions written.")
         print(f"  splits columns: {list(splits.columns)}")
         print(f"  unique split values: {sorted(splits[split_col].astype(str).unique())}")
 
