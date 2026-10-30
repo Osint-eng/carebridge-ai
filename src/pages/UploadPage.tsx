@@ -1,10 +1,10 @@
 import React, { useState } from 'react';
-import { useDocuments } from '@/context/DocumentContext';
+import { useDocument } from '@/context/DocumentContext';
 import { useNavigate } from 'react-router-dom';
 import { Upload, FileText } from 'lucide-react';
 
 export const UploadPage: React.FC = () => {
-  const { uploadDocument, loadSampleDocument, isProcessing, processingStage } = useDocuments();
+  const { uploadDocument, loadSampleDocument, isProcessing, processingStage } = useDocument();
   const navigate = useNavigate();
   const [pasteText, setPasteText] = useState('');
 
