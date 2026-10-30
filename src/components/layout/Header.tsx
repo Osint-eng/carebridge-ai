@@ -16,7 +16,7 @@ import { Link } from 'react-router-dom';
 
 export const Header: React.FC = () => {
   const { profile, isSupabaseConfigured } = useAuth();
-  const { currentDoc, documents, setCurrentDoc } = useDocuments();
+  const { currentDoc, documents, setCurrentDoc } = useDocument();
   const {
     reducedMotion,
     toggleReducedMotion,
