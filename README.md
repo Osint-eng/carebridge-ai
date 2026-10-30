@@ -38,6 +38,7 @@ CareBridge AI operates under a strict clinical safety contract:
 - **Styling**: Tailwind CSS + Framer Motion
 - **Auth / Backend**: Supabase (with local fallback)
 - **PDF**: jsPDF + html2canvas
+- **TTS**: Cartesia Sonic (Daniel voice)
 
 ---
 
@@ -52,9 +53,13 @@ Optional environment variables:
 ```
 VITE_SUPABASE_URL=your_supabase_url
 VITE_SUPABASE_ANON_KEY=your_anon_key
+VITE_CARTESIA_API_KEY=sk_car_...   # Cartesia TTS (Daniel). Falls back to built-in key if unset.
 ```
 
-If not set, the app uses secure local storage for auth.
+If Supabase is not set, the app uses secure local storage for auth.
+
+**Thresholds:** Clinical validation and faithfulness checks use a unified pass threshold of **0.8** (80%).  
+**Voice:** Browser SpeechSynthesis was removed. Audio Care Plan uses Cartesia **Daniel** (`sonic-3`, voice id `47c38ca4-5f35-497b-b1a3-415245fb35e1`) with the same 0.8 quality threshold.
 
 ---
 
