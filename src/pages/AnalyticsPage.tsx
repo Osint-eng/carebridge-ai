@@ -1,8 +1,8 @@
 import React from 'react';
-import { useDocuments } from '@/context/DocumentContext';
+import { useDocument } from '@/context/DocumentContext';
 
 export const AnalyticsPage: React.FC = () => {
-  const { documents } = useDocuments();
+  const { documents } = useDocument();
   const verified = documents.filter((d) => d.faithfulnessReport?.overallStatus === 'VERIFIED').length;
   const failed = documents.filter((d) => d.faithfulnessReport?.overallStatus === 'VALIDATION_FAILED').length;
   const avgScore = documents.length
