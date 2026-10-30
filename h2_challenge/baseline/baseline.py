@@ -61,7 +61,7 @@ def parse_date(s):
     return None
 
 
-DATE_RE = re.compile(r"\d{1,2}[/.-]\d{1,2}[/.-]\d{4}|\d{1,2}-[A-Za-z]{3}-\d{2}|\d{1,2}(?:st|nd|rd|th)?\s+[A-Za-z]+\s+\d{4}")
+DATE_RE = re.compile(r"\d{1,2}[/.\-]\d{1,2}[/.\-]\d{4}|\d{1,2}-[A-Za-z]{3}-\d{2}|\d{1,2}(?:st|nd|rd|th)?\s+[A-Za-z]+\s+\d{4}")
 
 
 def parse_med_line(line):
@@ -111,19 +111,11 @@ def extract(text):
 def plain_text(cp):
     out = ["YOUR MEDICINES"]
     for m in cp["medicines"]:
-        out.append(f"- {m.get('name','')} {m.get('dose','')} {m.get('frequency','')} {m.get('duration','')}".strip())
-    if cp.get("stop_medicines"):
-        out.append("STOP THESE")
-        for s in cp["stop_medicines"]:
-            out.append(f"- {s}")
-    if cp.get("warning_signs"):
-        out.append("WARNING SIGNS - GO TO HOSPITAL")
-        for w in cp["warning_signs"]:
-            out.append(f"- {w}")
-    if cp.get("follow_ups"):
-        out.append("FOLLOW-UP")
-        for f in cp["follow_ups"]:
-            out.append(f"- {f.get('date','')} {f.get('purpose','')}".strip())
+        out.append(f"- {m['name']} {m['dose']} {m['frequency']} {m['duration']}".strip())
+    if cp["stop_medicines"]:
+        out.append("STOP these medicines: " + ", ".join(cp["stop_medicines"]))
+    out.append(f"WARNING SIGNS: {len(cp['warning_signs'])} listed in your summary - read them with your nurse.")
+    out.append("VISITS: " + "; ".join(f["date"] for f in cp["follow_ups"]))
     return "\n".join(out)
 
 
@@ -131,35 +123,28 @@ def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("--split", choices=["dev", "test", "all"], default="test")
     ap.add_argument("--out", default=None)
-    ap.add_argument("--data_dir", default=str(HERE.parent / "data" / "h2"))
+    ap.add_argument("--data_dir", default=str(HERE.parent.parent / "data" / "h2"))
     a = ap.parse_args()
     data = Path(a.data_dir)
-    splits = pd.read_csv(data / "splits.csv")
-    if a.split != "all":
-        ids = set(splits.loc[splits["split"] == a.split, "id"].astype(str))
+    if a.split == "all":
+        ids = set(pd.read_csv(data / "splits.csv")["summary_id"])
     else:
-        ids = set(splits["id"].astype(str))
-    out = Path(a.out) if a.out else HERE.parent / "submission" / "H2_predictions.jsonl"
+        ids = set(pd.read_csv(data / f"{a.split}_ids.csv")["summary_id"])
+    out = Path(a.out) if a.out else HERE / "submission" / "H2_predictions.jsonl"
     out.parent.mkdir(parents=True, exist_ok=True)
     n = 0
     with open(data / "summaries.jsonl", encoding="utf-8") as f, open(out, "w", encoding="utf-8") as g:
         for line in f:
-            row = json.loads(line)
-            sid = str(row.get("id") or row.get("summary_id") or "")
-            if sid not in ids:
+            rec = json.loads(line)
+            if rec["summary_id"] not in ids:
                 continue
-            text = row.get("text") or row.get("summary") or row.get("discharge_summary") or ""
-            cp = extract(text)
-            pred = {
-                "id": sid,
-                "care_plan": cp,
-                "plain_text_en": plain_text(cp),
-                "plain_text_translated": plain_text(cp),
-                "language_code": "hi",
-            }
-            g.write(json.dumps(pred, ensure_ascii=False) + "\n")
+            cp = extract(rec["text"])
+            txt = plain_text(cp)
+            g.write(json.dumps(dict(summary_id=rec["summary_id"], care_plan=cp, plain_text_en=txt,
+                                    translation=dict(language_code="hi", text=txt),  # English copy: scores 0 on translation
+                                    readability=dict(metric="none", score=None)), ensure_ascii=False) + "\n")
             n += 1
-    print(f"Wrote {n} predictions to {out}")
+    print(f"wrote {n} predictions to {out}")
 
 
 if __name__ == "__main__":
