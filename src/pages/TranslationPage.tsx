@@ -1,8 +1,8 @@
 import React, { useState } from 'react';
-import { useDocuments } from '@/context/DocumentContext';
+import { useDocument } from '@/context/DocumentContext';
 
 export const TranslationPage: React.FC = () => {
-  const { currentDoc, translateCarePlan, isProcessing } = useDocuments();
+  const { currentDoc, translateCarePlan, isProcessing } = useDocument();
   const [lang, setLang] = useState<'Telugu' | 'English' | 'Hindi'>('Telugu');
   const [result, setResult] = useState<any>(null);
 
