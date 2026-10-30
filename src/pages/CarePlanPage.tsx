@@ -1,9 +1,9 @@
 import React from 'react';
-import { useDocuments } from '@/context/DocumentContext';
+import { useDocument } from '@/context/DocumentContext';
 import { useNavigate } from 'react-router-dom';
 
 export const CarePlanPage: React.FC = () => {
-  const { currentDoc, generateCarePlan, isProcessing, processingStage } = useDocuments();
+  const { currentDoc, generateCarePlan, isProcessing, processingStage } = useDocument();
   const navigate = useNavigate();
 
   const handleGenerate = async () => {
