@@ -4,7 +4,7 @@
 
 ---
 
-## 🛡️ Core Safety Principles
+## Core Safety Principles
 
 CareBridge AI operates under a strict clinical safety contract:
 - **Never invent medical instructions**
@@ -16,33 +16,36 @@ CareBridge AI operates under a strict clinical safety contract:
 
 ---
 
-## 🚀 Key Features
+## Key Features
 
 1. **Cinematic 3D Landing Page** – Central 3D glowing 'C' constructed from medical particles
 2. **Supabase Authentication** – Role-based (Patient, Caregiver, Healthcare Staff, Administrator)
 3. **Dashboard Command Center** – 3D glass statistics + pipeline navigator
-4. **Document Extraction** – Side-by-side source highlighting
-5. **AI Care Plan** – Every section has View Source verification
-6. **Faithfulness Validation Scanner** – 9-point assertion matrix, blocks on mismatch
-7. **Multilingual Translation** – English + Telugu (extensible)
+4. **Document Extraction** – Client-side regex + section heuristics (mirrors the H2 Python extractor)
+5. **AI Care Plan** – Structured plan with source-quote style fidelity
+6. **Faithfulness Validation Scanner** – Real comparison of dose / frequency / duration / STOP / follow-up against source text; blocks on critical mismatch (threshold 0.8)
+7. **Multilingual support** – English + lightweight offline Hindi phrase map (doses kept in Latin script); extensible
 8. **Readability Score** – Targets Class 8 or easier
 9. **Printable Fridge Sheet** – A4 high-contrast family sheet + PDF
 10. **Medicine Timetable** – 7-day adherence schedule
 
 ---
 
-## 🛠️ Tech Stack
+## Tech Stack (what is actually implemented)
 
 - **Frontend**: React 18 + TypeScript + Vite
 - **3D**: Three.js + React Three Fiber + Drei
 - **Styling**: Tailwind CSS + Framer Motion
-- **Auth / Backend**: Supabase (with local fallback)
+- **Auth / Backend**: Supabase (with local-storage fallback)
 - **PDF**: jsPDF + html2canvas
 - **TTS**: Cartesia Sonic (Daniel voice)
+- **H2 scoring pipeline**: pure Python under `evaluation/` and `h2_challenge/` (no FastAPI service, no PyMuPDF)
+
+> Note for judges / reviewers: any presentation slides that previously mentioned FastAPI or PyMuPDF are outdated. The current repository implements the features listed above.
 
 ---
 
-## 📦 Getting Started
+## Getting Started
 
 ```bash
 npm install
@@ -59,10 +62,14 @@ VITE_CARTESIA_API_KEY=sk_car_...   # Cartesia TTS (Daniel). Falls back to built-
 If Supabase is not set, the app uses secure local storage for auth.
 
 **Thresholds:** Clinical validation and faithfulness checks use a unified pass threshold of **0.8** (80%).  
-**Voice:** Browser SpeechSynthesis was removed. Audio Care Plan uses Cartesia **Daniel** (`sonic-3`, voice id `47c38ca4-5f35-497b-b1a3-415245fb35e1`) with the same 0.8 quality threshold.
+**Voice:** Audio Care Plan uses Cartesia **Daniel** (`sonic-3`).
+
+## H2 Challenge workflow
+
+See `SUBMISSION_README.md` for generating predictions, running the official scorer (must be from the package folder to enable the verbatim-copy check), and iterating on hard-penalty cases.
 
 ---
 
-## 📄 License
+## License
 
 Private / educational use.

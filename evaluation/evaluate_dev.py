@@ -4,8 +4,15 @@ Lightweight development scorer aligned with jury weights:
   Medicine recall 30%, Dose exactness 20%, Frequency 15%,
   Duration 10%, Follow-up date recall 15%, Stop-medicine recall 10%.
 
-Usage (with answer keys JSONL):
-  python evaluate_dev.py --pred ../submission/H2_predictions.jsonl --gold path/to/dev_keys.jsonl
+Also reports text presence. For the official (verbatim-copy + hard-penalty)
+score you MUST run the official evaluate.py from the package folder after
+setup_h2_from_zip.sh – that enables the full check and will usually produce
+a lower number than this helper.
+
+Usage:
+  python evaluation/evaluate_dev.py \
+      --pred submission/dev_improved.jsonl \
+      --gold data/h2/dev_fact_key.jsonl
 """
 from __future__ import annotations
 
@@ -35,8 +42,11 @@ def load_jsonl(path: Path) -> dict[str, dict]:
 
 
 def score_pair(pred: dict, gold: dict) -> dict[str, float]:
-    g_meds = gold.get("medications") or []
-    p_meds = pred.get("medications") or []
+    # Support both gold shapes (medications vs medicines)
+    g_meds = gold.get("medications") or gold.get("medicines") or []
+    p_cp = pred.get("care_plan") or pred
+    p_meds = p_cp.get("medicines") or p_cp.get("medications") or []
+
     g_keys = {norm(m.get("name", "")): m for m in g_meds}
     p_keys = {norm(m.get("name", "")): m for m in p_meds}
 
@@ -58,9 +68,9 @@ def score_pair(pred: dict, gold: dict) -> dict[str, float]:
         matched += 1
         if dose_tok(gm.get("dose", "")) == dose_tok(pm.get("dose", "")):
             dose_ok += 1
-        if norm(gm.get("frequency", "")) == norm(pm.get("frequency", "")) or (
-            norm(gm.get("frequency", "")) and norm(gm.get("frequency", "")) in norm(pm.get("frequency", ""))
-        ):
+        gfreq = norm(gm.get("frequency", ""))
+        pfreq = norm(pm.get("frequency", ""))
+        if gfreq == pfreq or (gfreq and gfreq in pfreq):
             freq_ok += 1
         if norm(gm.get("duration", "")) == norm(pm.get("duration", "")) or not gm.get("duration"):
             dur_ok += 1
@@ -69,10 +79,10 @@ def score_pair(pred: dict, gold: dict) -> dict[str, float]:
     dur_acc = dur_ok / matched if matched else 1.0
 
     g_fu = gold.get("follow_ups") or []
-    p_fu = pred.get("follow_ups") or []
+    p_fu = p_cp.get("follow_ups") or []
     if g_fu:
-        g_dates = [norm(f.get("date_or_timeframe", "")) for f in g_fu]
-        p_dates = [norm(f.get("date_or_timeframe", "")) for f in p_fu]
+        g_dates = [norm(f.get("date_or_timeframe") or f.get("date") or "") for f in g_fu]
+        p_dates = [norm(f.get("date_or_timeframe") or f.get("date") or "") for f in p_fu]
         fu_hit = 0
         for gd in g_dates:
             if not gd:
@@ -84,8 +94,10 @@ def score_pair(pred: dict, gold: dict) -> dict[str, float]:
     else:
         fu_recall = 1.0
 
-    g_stop = [norm(s.get("name", "")) for s in (gold.get("stop_medicines") or [])]
-    p_stop = [norm(s.get("name", "")) for s in (pred.get("stop_medicines") or [])]
+    g_stop = [norm(s.get("name", "") if isinstance(s, dict) else str(s))
+              for s in (gold.get("stop_medicines") or [])]
+    p_stop = [norm(s.get("name", "") if isinstance(s, dict) else str(s))
+              for s in (p_cp.get("stop_medicines") or [])]
     if g_stop:
         stop_hit = sum(1 for gs in g_stop if any(gs in ps or ps in gs for ps in p_stop))
         stop_recall = stop_hit / len(g_stop)
@@ -139,9 +151,14 @@ def main() -> None:
     print(f"Scored {n} records")
     for k, v in totals.items():
         print(f"  {k}: {v / n:.4f}")
-    text_ok = sum(1 for i in ids if (preds[i].get("care_plan_en") or "").strip()) / n
+    text_ok = sum(
+        1 for i in ids
+        if (preds[i].get("plain_text_en") or preds[i].get("care_plan_en") or "").strip()
+    ) / n
     overall = 0.8 * (totals["structured_score"] / n) + 0.2 * text_ok
     print(f"  overall (80% structured + 20% text presence): {overall:.4f}")
+    print("\nNote: This is a development helper. Official score uses evaluate.py")
+    print("from the H2 package folder (verbatim-copy + hard penalties).")
 
 
 if __name__ == "__main__":
