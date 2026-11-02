@@ -5,8 +5,7 @@ import { Canvas } from '@react-three/fiber';
 import { VerificationScanner3D } from '@/components/3d/VerificationScanner3D';
 import { CameraRig } from '@/components/3d/CameraRig';
 import { ShieldCheck, AlertTriangle, CheckCircle2, XCircle, ArrowRight } from 'lucide-react';
-
-const FAITHFULNESS_THRESHOLD = 0.8; // 80% — same as clinical validation
+import { FAITHFULNESS_THRESHOLD } from '@/utils/faithfulnessChecker';
 
 export const FaithfulnessPage: React.FC = () => {
   const { currentDoc, runFaithfulnessCheck, isProcessing, processingStage } = useDocument();
@@ -55,7 +54,6 @@ export const FaithfulnessPage: React.FC = () => {
 
   return (
     <div className="space-y-6">
-      {/* Header */}
       <div className="flex flex-col sm:flex-row sm:items-end sm:justify-between gap-3">
         <div>
           <h1 className="text-2xl font-bold text-slate-900 dark:text-white flex items-center gap-2">
@@ -64,7 +62,9 @@ export const FaithfulnessPage: React.FC = () => {
           </h1>
           <p className="text-sm text-slate-500 mt-1">
             Every instruction is checked against the original discharge summary. Pass threshold:{' '}
-            <span className="font-semibold text-emerald-600 dark:text-emerald-400">0.8 (80%)</span>
+            <span className="font-semibold text-emerald-600 dark:text-emerald-400">
+              {FAITHFULNESS_THRESHOLD} ({Math.round(FAITHFULNESS_THRESHOLD * 100)}%)
+            </span>
           </p>
         </div>
 
@@ -82,7 +82,6 @@ export const FaithfulnessPage: React.FC = () => {
         )}
       </div>
 
-      {/* 3D Scanner */}
       <div className="h-64 sm:h-72 bg-slate-50 dark:bg-slate-900 rounded-xl border border-slate-200 dark:border-slate-800 overflow-hidden">
         <Canvas camera={{ position: [0, 0, 6], fov: 45 }}>
           <ambientLight intensity={0.6} />
@@ -91,7 +90,6 @@ export const FaithfulnessPage: React.FC = () => {
         </Canvas>
       </div>
 
-      {/* Processing banner */}
       {isProcessing && (
         <div className="bg-sky-50 dark:bg-sky-950/30 border border-sky-200 dark:border-sky-800 rounded-xl p-4 text-sm text-sky-700 dark:text-sky-300 flex items-center gap-3">
           <div className="w-4 h-4 border-2 border-sky-500 border-t-transparent rounded-full animate-spin" />
@@ -99,7 +97,6 @@ export const FaithfulnessPage: React.FC = () => {
         </div>
       )}
 
-      {/* Action buttons */}
       <div className="flex flex-wrap gap-3">
         <button
           onClick={() => handleCheck(false)}
@@ -119,7 +116,6 @@ export const FaithfulnessPage: React.FC = () => {
         </button>
       </div>
 
-      {/* Score card */}
       {report && (
         <div
           className={`rounded-xl border p-6 ${
@@ -133,7 +129,7 @@ export const FaithfulnessPage: React.FC = () => {
               <p className="text-3xl font-bold tracking-tight">
                 {report.scorePercentage}%
                 <span className="text-base font-normal text-slate-500 ml-2">
-                  / 100 (threshold 80%)
+                  / 100 (threshold {Math.round(FAITHFULNESS_THRESHOLD * 100)}%)
                 </span>
               </p>
               <p className="text-sm text-slate-600 dark:text-slate-400 mt-1">
@@ -156,7 +152,6 @@ export const FaithfulnessPage: React.FC = () => {
             </div>
           </div>
 
-          {/* Progress bar */}
           <div className="mt-4 h-2.5 bg-slate-200 dark:bg-slate-800 rounded-full overflow-hidden">
             <div
               className={`h-full rounded-full transition-all duration-500 ${
@@ -167,13 +162,14 @@ export const FaithfulnessPage: React.FC = () => {
           </div>
           <div className="flex justify-between text-xs text-slate-500 mt-1">
             <span>0%</span>
-            <span className="font-medium text-emerald-600">80% threshold</span>
+            <span className="font-medium text-emerald-600">
+              {Math.round(FAITHFULNESS_THRESHOLD * 100)}% threshold
+            </span>
             <span>100%</span>
           </div>
         </div>
       )}
 
-      {/* Mismatches */}
       {report && report.mismatches.length > 0 && (
         <div className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-xl overflow-hidden">
           <div className="px-5 py-3 border-b border-slate-200 dark:border-slate-800 bg-red-50 dark:bg-red-950/30">
@@ -214,7 +210,6 @@ export const FaithfulnessPage: React.FC = () => {
         </div>
       )}
 
-      {/* Category scores */}
       {report && report.categoryScores.length > 0 && (
         <div className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-xl p-5">
           <h2 className="text-sm font-semibold text-slate-800 dark:text-slate-200 mb-3">Category Breakdown</h2>
@@ -236,7 +231,6 @@ export const FaithfulnessPage: React.FC = () => {
         </div>
       )}
 
-      {/* Next steps */}
       {report && isVerified && (
         <div className="flex justify-end">
           <button
