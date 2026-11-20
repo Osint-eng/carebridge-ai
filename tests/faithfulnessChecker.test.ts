@@ -1,8 +1,8 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { extractDischargeData } from '@/utils/dischargeExtractor';
-import { runFaithfulnessAudit } from '@/utils/faithfulnessChecker';
-import type { CarePlan } from '@/types';
+import { extractDischargeData } from '../src/utils/dischargeExtractor';
+import { runFaithfulnessAudit } from '../src/utils/faithfulnessChecker';
+import type { CarePlan } from '../src/types';
 
 function buildCarePlanFromSource(sourceText: string): CarePlan {
   const extracted = extractDischargeData(sourceText);

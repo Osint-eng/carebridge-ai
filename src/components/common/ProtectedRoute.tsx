@@ -20,7 +20,7 @@ export const ProtectedRoute: React.FC<ProtectedRouteProps> = ({ children, roles 
     );
   }
 
-  // Must have an authenticated user (session only issued after MFA)
+  // Must have an authenticated user session
   if (!user?.id || !user?.email) {
     return <Navigate to="/login" state={{ from: location }} replace />;
   }

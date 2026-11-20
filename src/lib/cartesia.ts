@@ -14,9 +14,6 @@ export const CARTESIA_DANIEL_VOICE_ID = CARTESIA_RIYA_VOICE_ID;
 /** Sonic model (multilingual Indic-capable) */
 export const CARTESIA_MODEL_ID = 'sonic-3';
 
-/** Confidence / quality threshold (0–1) — same jury benchmark */
-export const CARTESIA_QUALITY_THRESHOLD = 0.8;
-
 const TTS_PROXY_URL = '/api/tts';
 
 /** Supported care-plan voice languages (Cartesia language codes) */
@@ -85,15 +82,18 @@ export async function synthesizeSpeech(
   });
 
   if (!res.ok) {
-    let message = `Audio synthesis failed (${res.status})`;
-    try {
-      const data = await res.json();
-      if (data?.error) message = data.error;
-    } catch {
-      const errText = await res.text().catch(() => '');
-      if (errText) message = `${message}: ${errText}`;
+    const contentType = res.headers.get('content-type') || '';
+    if (contentType.includes('application/json')) {
+      try {
+        const data = await res.json();
+        if (data?.error) throw new Error(data.error);
+      } catch (e) {
+        if (e instanceof Error && e.message) throw e;
+      }
     }
-    throw new Error(message);
+    throw new Error(
+      `TTS requires server (vercel dev / production) with CARTESIA_API_KEY configured (HTTP ${res.status}).`
+    );
   }
 
   return res.blob();

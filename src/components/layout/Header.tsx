@@ -49,7 +49,7 @@ export const Header: React.FC = () => {
             </span>
           </h1>
           <p className="text-[11px] text-slate-400 font-medium">
-            {profile?.role || 'Patient'} Mode • Source Fidelity Guaranteed
+            {profile?.role || 'Patient'} Mode • Faithfulness checks available
           </p>
         </div>
 

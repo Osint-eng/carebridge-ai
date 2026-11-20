@@ -6,7 +6,6 @@ import { CameraRig } from '@/components/3d/CameraRig';
 import { Play, Square, Loader2 } from 'lucide-react';
 import {
   playWithRiya,
-  CARTESIA_QUALITY_THRESHOLD,
   CARTESIA_RIYA_VOICE_ID,
   CARTESIA_MODEL_ID,
   INDIC_VOICE_LANGUAGES,
@@ -86,7 +85,7 @@ export const AudioPage: React.FC = () => {
       <div>
         <h1 className="text-2xl font-bold text-slate-900 dark:text-white">Audio Care Plan</h1>
         <p className="text-sm text-slate-500 mt-1">
-          Cartesia Riya (Indian voice) · quality threshold {CARTESIA_QUALITY_THRESHOLD}
+          Cartesia Riya (Indian voice) · synthesized server-side via /api/tts
         </p>
       </div>
 
@@ -127,11 +126,7 @@ export const AudioPage: React.FC = () => {
           </p>
           <p>
             <span className="font-semibold text-slate-800 dark:text-slate-200">Model:</span>{' '}
-            {CARTESIA_MODEL_ID}
-          </p>
-          <p>
-            <span className="font-semibold text-slate-800 dark:text-slate-200">Threshold:</span>{' '}
-            {CARTESIA_QUALITY_THRESHOLD} (pass only when quality ≥ this value)
+            {CARTESIA_MODEL_ID} (44.1 kHz WAV)
           </p>
         </div>
       </div>
