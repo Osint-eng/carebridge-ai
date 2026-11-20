@@ -5,6 +5,7 @@ import {
   fetchUserProfile,
   updateEditableProfile,
 } from '@/lib/supabase';
+import { clearVerificationRequests } from '@/lib/verificationStore';
 import { UserProfile } from '@/types';
 
 export type EditableProfileUpdate = Partial<
@@ -146,10 +147,17 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
   const logout = async () => {
     try {
       await supabase.auth.signOut();
-      setUser(null);
-      setProfile(null);
     } catch (err) {
       console.error('Sign out error:', err);
+    } finally {
+      try {
+        localStorage.removeItem('carebridge_documents');
+      } catch {
+        // ignore storage errors
+      }
+      clearVerificationRequests();
+      setUser(null);
+      setProfile(null);
     }
   };
 

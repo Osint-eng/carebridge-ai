@@ -55,14 +55,14 @@ export const UploadPage: React.FC = () => {
         </p>
       </div>
 
-      {/* Demo tip for judges */}
+      {/* Demo mode notice */}
       <div className="bg-amber-50 dark:bg-amber-950/30 border border-amber-200 dark:border-amber-800 rounded-xl p-4 text-sm text-amber-800 dark:text-amber-200 flex gap-3">
         <AlertCircle className="w-5 h-5 shrink-0 mt-0.5" />
         <div>
-          <p className="font-medium">Recommended demo path</p>
+          <p className="font-medium">Demo mode – synthetic data only</p>
           <p className="mt-0.5 opacity-90">
-            Click <strong>Load Cardiology Sample</strong> → Run Extraction → Generate Care Plan → Run Faithfulness Check.
-            This path is the most reliable for live judging.
+            Documents are stored in browser localStorage for this demo and cleared on sign out — do not upload real patient PHI. Click{' '}
+            <strong>Load Cardiology Sample</strong> → Run Extraction → Generate Care Plan → Run Faithfulness Check.
           </p>
         </div>
       </div>

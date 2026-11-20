@@ -146,3 +146,13 @@ export function requestChanges(
 export function countPending(): number {
   return listPendingRequests().length;
 }
+
+export function clearVerificationRequests(): void {
+  try {
+    localStorage.removeItem(KEY);
+    window.dispatchEvent(new CustomEvent('carebridge-verification-updated'));
+  } catch {
+    // ignore storage errors
+  }
+}
+

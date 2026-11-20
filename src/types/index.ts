@@ -120,7 +120,7 @@ export interface TranslatedCarePlan {
   dietInstructions: string[];
   activityInstructions: string[];
   followUps: (FollowUpInstruction & { translatedInstructions: string })[];
-  translationFaithfulnessStatus: 'Verified' | 'Validation Failed';
+  translationFaithfulnessStatus: 'Verified' | 'Partial' | 'Needs review' | 'Validation Failed';
   translatedAt: string;
 }
 

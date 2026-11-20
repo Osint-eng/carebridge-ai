@@ -96,7 +96,7 @@ export const VerificationInboxPage: React.FC = () => {
             Verification inbox
           </h1>
           <p className="text-sm text-slate-500 mt-1">
-            Care plans submitted by patients for staff faithfulness review
+            Demo mode – synthetic data only · Care plans submitted for review (cleared on sign out)
           </p>
         </div>
         <div className="flex items-center gap-2">

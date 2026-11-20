@@ -7,6 +7,7 @@
     "dev": "vite --host 0.0.0.0 --port 3000",
     "build": "vite build",
     "typecheck": "tsc --noEmit",
+    "test": "esbuild tests/faithfulnessChecker.test.ts --bundle --platform=node --format=esm --outfile=/tmp/faithfulness.test.mjs && node --test /tmp/faithfulness.test.mjs",
     "preview": "vite preview"
   },
   "dependencies": {

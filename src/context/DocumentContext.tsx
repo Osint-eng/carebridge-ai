@@ -37,8 +37,66 @@ const DocumentContext = createContext<DocumentContextType | undefined>(undefined
 
 const STORAGE_KEY = 'carebridge_documents';
 
+const countSyllables = (rawWord: string): number => {
+  const word = rawWord.toLowerCase().replace(/[^a-z]/g, '');
+  if (!word) return 0;
+  if (word.length <= 3) return 1;
+  let trimmed = word.replace(/(?:[^laeiouy]es|ed|[^laeiouy]e)$/, '');
+  trimmed = trimmed.replace(/^y/, '');
+  const groups = trimmed.match(/[aeiouy]{1,2}/g);
+  return Math.max(1, groups ? groups.length : 1);
+};
+
+const computeFleschKincaid = (text: string) => {
+  const words = text.split(/\s+/).map((w) => w.replace(/[^a-zA-Z0-9'-]/g, '')).filter(Boolean);
+  const totalWords = words.length;
+  const sentences = text.split(/[.!?]+/).map((s) => s.trim()).filter(Boolean).length || (totalWords > 0 ? 1 : 0);
+
+  if (totalWords === 0 || sentences === 0) {
+    return {
+      fleschKincaidGradeLevel: 0,
+      readingEaseScore: 0,
+      totalWords: 0,
+      averageSentenceLength: 0,
+      complexWordCount: 0,
+      complexWordPercentage: 0,
+      targetAchieved: false,
+    };
+  }
+
+  let totalSyllables = 0;
+  let complexWordCount = 0;
+  for (const w of words) {
+    const syl = countSyllables(w);
+    totalSyllables += syl;
+    if (syl >= 3) complexWordCount += 1;
+  }
+
+  const avgSentenceLength = totalWords / sentences;
+  const avgSyllablesPerWord = totalSyllables / totalWords;
+
+  const grade = Math.max(
+    0,
+    Math.round((0.39 * avgSentenceLength + 11.8 * avgSyllablesPerWord - 15.59) * 10) / 10,
+  );
+  const ease = Math.min(
+    100,
+    Math.max(0, Math.round((206.835 - 1.015 * avgSentenceLength - 84.6 * avgSyllablesPerWord) * 10) / 10),
+  );
+
+  return {
+    fleschKincaidGradeLevel: grade,
+    readingEaseScore: ease,
+    totalWords,
+    averageSentenceLength: Math.round(avgSentenceLength * 10) / 10,
+    complexWordCount,
+    complexWordPercentage: Math.round((complexWordCount / totalWords) * 1000) / 10,
+    targetAchieved: grade <= 8.0,
+  };
+};
+
 export const DocumentProvider: React.FC<{ children: React.ReactNode }> = ({ children }) => {
-  const { user } = useAuth();
+  const { user, loading: authLoading } = useAuth();
   const [documents, setDocuments] = useState<DischargeDocument[]>(() => {
     try {
       const raw = localStorage.getItem(STORAGE_KEY);
@@ -53,8 +111,27 @@ export const DocumentProvider: React.FC<{ children: React.ReactNode }> = ({ chil
   const [processingStage, setProcessingStage] = useState('');
 
   useEffect(() => {
-    localStorage.setItem(STORAGE_KEY, JSON.stringify(documents));
-  }, [documents]);
+    if (authLoading) return;
+    if (!user) {
+      setDocuments((prev) => (prev.length === 0 ? prev : []));
+      setCurrentDoc(null);
+      setTimetableChecklist((prev) => (Object.keys(prev).length === 0 ? prev : {}));
+      try {
+        localStorage.removeItem(STORAGE_KEY);
+      } catch {
+        // ignore
+      }
+    }
+  }, [user, authLoading]);
+
+  useEffect(() => {
+    if (authLoading || !user) return;
+    try {
+      localStorage.setItem(STORAGE_KEY, JSON.stringify(documents));
+    } catch {
+      // ignore
+    }
+  }, [documents, user, authLoading]);
 
   const loadDocumentById = (id: string) => {
     const doc = documents.find((d) => d.id === id) || null;
@@ -148,19 +225,31 @@ export const DocumentProvider: React.FC<{ children: React.ReactNode }> = ({ chil
     setIsProcessing(true);
     setProcessingStage('Generating care plan...');
 
+    const summary =
+      'Your care plan has been prepared from your hospital discharge summary. Follow the medication schedule and contact your doctor if you have concerns.';
+    const combinedText = [
+      summary,
+      ...doc.extractedData.medications.map((m) => `${m.name} ${m.dose} ${m.frequency} ${m.duration}`.trim()),
+      ...doc.extractedData.warningSigns.map((w) => `${w.sign}. ${w.actionRequired}`.trim()),
+      ...doc.extractedData.dietInstructions,
+      ...doc.extractedData.activityInstructions,
+      ...doc.extractedData.followUps.map((f) => `${f.departmentOrDoctor} ${f.dateOrTimeframe}`.trim()),
+    ]
+      .filter(Boolean)
+      .join('. ');
+
     const plan: CarePlan = {
       id: crypto.randomUUID(),
       documentId: docId,
       generatedAt: new Date().toISOString(),
       status: 'pending_verification',
-      readabilityGradeLevel: 7.5,
+      readabilityGradeLevel: computeFleschKincaid(combinedText).fleschKincaidGradeLevel,
       medications: doc.extractedData.medications,
       warningSigns: doc.extractedData.warningSigns,
       dietInstructions: doc.extractedData.dietInstructions,
       activityInstructions: doc.extractedData.activityInstructions,
       followUps: doc.extractedData.followUps,
-      patientFriendlySummary:
-        'Your care plan has been prepared from your hospital discharge summary. Follow the medication schedule and contact your doctor if you have concerns.',
+      patientFriendlySummary: summary,
     };
 
     setDocuments((prev) => prev.map((d) => (d.id === docId ? { ...d, carePlan: plan } : d)));
@@ -228,6 +317,13 @@ export const DocumentProvider: React.FC<{ children: React.ReactNode }> = ({ chil
     if (!doc?.carePlan) throw new Error('No care plan');
 
     const hi = targetLanguage === 'Hindi';
+    const status: TranslatedCarePlan['translationFaithfulnessStatus'] =
+      targetLanguage === 'English'
+        ? 'Verified'
+        : hi
+        ? 'Partial'
+        : 'Needs review';
+
     const translated: TranslatedCarePlan = {
       language: targetLanguage,
       languageNativeName:
@@ -250,7 +346,7 @@ export const DocumentProvider: React.FC<{ children: React.ReactNode }> = ({ chil
         ...f,
         translatedInstructions: f.dateOrTimeframe,
       })),
-      translationFaithfulnessStatus: 'Verified',
+      translationFaithfulnessStatus: status,
       translatedAt: new Date().toISOString(),
     };
 
@@ -266,19 +362,31 @@ export const DocumentProvider: React.FC<{ children: React.ReactNode }> = ({ chil
 
   const calculateReadability = (docId: string): ReadabilityMetrics => {
     const doc = documents.find((d) => d.id === docId);
-    const text = doc?.carePlan?.patientFriendlySummary || doc?.extractedData?.rawText || '';
-    const words = text.split(/\s+/).filter(Boolean).length;
-    const sentences = text.split(/[.!?]+/).filter(Boolean).length || 1;
+    const planText = doc?.carePlan
+      ? [
+          doc.carePlan.patientFriendlySummary,
+          ...doc.carePlan.medications.map((m) => `${m.name} ${m.dose} ${m.frequency} ${m.duration}`.trim()),
+          ...doc.carePlan.warningSigns.map((w) => `${w.sign}. ${w.actionRequired}`.trim()),
+          ...doc.carePlan.dietInstructions,
+          ...doc.carePlan.activityInstructions,
+          ...doc.carePlan.followUps.map((f) => `${f.departmentOrDoctor} ${f.dateOrTimeframe}`.trim()),
+        ]
+          .filter(Boolean)
+          .join('. ')
+      : '';
+    const text = planText || doc?.extractedData?.rawText || '';
+    const fk = computeFleschKincaid(text);
+
     return {
-      fleschKincaidGradeLevel: 7.4,
-      readingEaseScore: 72,
-      totalWords: words,
-      averageSentenceLength: words / sentences,
-      complexWordCount: Math.floor(words * 0.12),
-      complexWordPercentage: 12,
-      medicalTermsSimplified: 8,
-      targetAchieved: true,
-      originalTextSample: text.slice(0, 120),
+      fleschKincaidGradeLevel: fk.fleschKincaidGradeLevel,
+      readingEaseScore: fk.readingEaseScore,
+      totalWords: fk.totalWords,
+      averageSentenceLength: fk.averageSentenceLength,
+      complexWordCount: fk.complexWordCount,
+      complexWordPercentage: fk.complexWordPercentage,
+      medicalTermsSimplified: 0,
+      targetAchieved: fk.targetAchieved,
+      originalTextSample: (doc?.extractedData?.rawText || '').slice(0, 120),
       simplifiedTextSample: text.slice(0, 120),
       improvements: [],
     };
