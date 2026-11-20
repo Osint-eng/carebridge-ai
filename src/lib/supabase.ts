@@ -45,16 +45,77 @@ if (isSupabaseConfigured) {
   }
 }
 
-async function sha256(text: string): Promise<string> {
-  const data = new TextEncoder().encode(text);
-  const hash = await crypto.subtle.digest('SHA-256', data);
-  return Array.from(new Uint8Array(hash))
+/**
+ * Local auth fallback is DEMO-ONLY (when Supabase env vars are missing).
+ * Never use real patient emails or production passwords in local demo mode.
+ */
+const PBKDF2_ITERATIONS = 120_000;
+
+function bytesToHex(bytes: Uint8Array): string {
+  return Array.from(bytes)
     .map((b) => b.toString(16).padStart(2, '0'))
     .join('');
 }
 
+function hexToBytes(hex: string): Uint8Array {
+  const clean = hex.length % 2 === 0 ? hex : `0${hex}`;
+  const bytes = new Uint8Array(clean.length / 2);
+  for (let i = 0; i < clean.length; i += 2) {
+    bytes[i / 2] = parseInt(clean.slice(i, i + 2), 16) || 0;
+  }
+  return bytes;
+}
+
+async function sha256(text: string): Promise<string> {
+  const data = new TextEncoder().encode(text);
+  const hash = await crypto.subtle.digest('SHA-256', data);
+  return bytesToHex(new Uint8Array(hash));
+}
+
+async function pbkdf2Hash(
+  password: string,
+  saltHex: string,
+  iterations = PBKDF2_ITERATIONS
+): Promise<string> {
+  const enc = new TextEncoder();
+  const keyMaterial = await crypto.subtle.importKey(
+    'raw',
+    enc.encode(password),
+    'PBKDF2',
+    false,
+    ['deriveBits']
+  );
+  const saltBytes = hexToBytes(saltHex);
+  const bits = await crypto.subtle.deriveBits(
+    {
+      name: 'PBKDF2',
+      salt: saltBytes.buffer as ArrayBuffer,
+      iterations,
+      hash: 'SHA-256',
+    },
+    keyMaterial,
+    256
+  );
+  return `pbkdf2$${iterations}$${bytesToHex(new Uint8Array(bits))}`;
+}
+
 async function hashPassword(password: string, salt: string): Promise<string> {
-  return sha256(`${salt}:${password}`);
+  return pbkdf2Hash(password, salt, PBKDF2_ITERATIONS);
+}
+
+async function verifyPassword(
+  password: string,
+  salt: string,
+  storedHash: string
+): Promise<{ valid: boolean; needsUpgrade: boolean }> {
+  if (storedHash.startsWith('pbkdf2$')) {
+    const parts = storedHash.split('$');
+    const iter = Number(parts[1]) || PBKDF2_ITERATIONS;
+    const candidate = await pbkdf2Hash(password, salt, iter);
+    return { valid: candidate === storedHash, needsUpgrade: iter < PBKDF2_ITERATIONS };
+  }
+  const legacyCandidate = await sha256(`${salt}:${password}`);
+  return { valid: legacyCandidate === storedHash, needsUpgrade: true };
 }
 
 function randomSalt(): string {
@@ -384,8 +445,12 @@ class LocalAuthStorage {
       };
     }
 
-    const candidateHash = await hashPassword(trimmedPassword, account.passwordSalt);
-    if (candidateHash !== account.passwordHash) {
+    const { valid, needsUpgrade } = await verifyPassword(
+      trimmedPassword,
+      account.passwordSalt,
+      account.passwordHash
+    );
+    if (!valid) {
       account.failedAttempts = (account.failedAttempts || 0) + 1;
       if (account.failedAttempts >= MAX_FAILED_ATTEMPTS) {
         account.lockedUntil = Date.now() + LOCKOUT_MS;
@@ -399,6 +464,9 @@ class LocalAuthStorage {
       };
     }
 
+    if (needsUpgrade) {
+      account.passwordHash = await hashPassword(trimmedPassword, account.passwordSalt);
+    }
     account.failedAttempts = 0;
     account.lockedUntil = null;
     users[accountIndex] = account;

@@ -118,6 +118,10 @@ export const VerificationInboxPage: React.FC = () => {
         </div>
       </div>
 
+      <div className="rounded-xl border border-amber-200 bg-amber-50 dark:bg-amber-950/30 dark:border-amber-800 px-4 py-3 text-xs sm:text-sm text-amber-800 dark:text-amber-200">
+        Demo mode — data stored only in this browser and cleared on sign out. Use synthetic records only.
+      </div>
+
       {isProcessing && (
         <div className="rounded-xl border border-sky-200 bg-sky-50 dark:bg-sky-950/30 dark:border-sky-800 p-3 text-sm text-sky-800 dark:text-sky-200">
           {processingStage || 'Working…'}

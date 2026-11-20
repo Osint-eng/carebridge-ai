@@ -13,6 +13,7 @@ import { extractTextFromFile } from '@/utils/fileExtractor';
 import { extractDischargeData } from '@/utils/dischargeExtractor';
 import { runFaithfulnessAudit } from '@/utils/faithfulnessChecker';
 import { getSampleContent } from '@/lib/sampleDocuments';
+import { clearVerificationRequests } from '@/lib/verificationStore';
 
 interface DocumentContextType {
   documents: DischargeDocument[];
@@ -121,6 +122,7 @@ export const DocumentProvider: React.FC<{ children: React.ReactNode }> = ({ chil
       } catch {
         // ignore
       }
+      clearVerificationRequests();
     }
   }, [user, authLoading]);
 
