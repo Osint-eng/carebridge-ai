@@ -3,10 +3,15 @@ import { useAuth } from '@/context/AuthContext';
 import { useDocuments } from '@/context/DocumentContext';
 
 export const AdminPage: React.FC = () => {
-  const { profile } = useAuth();
+  const { profile, loading } = useAuth();
   const { documents } = useDocuments();
 
-  if (profile?.role !== 'Administrator') {
+  if (loading) {
+    return <div className="text-center py-20 text-slate-500">Verifying administrator profile…</div>;
+  }
+
+  // Role is read strictly from the non-editable profiles record
+  if (!profile || profile.role !== 'Administrator') {
     return <div className="text-center py-20 text-slate-500">Administrator access required.</div>;
   }
 

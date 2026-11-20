@@ -25,6 +25,7 @@ export const VerificationInboxPage: React.FC = () => {
   const [requests, setRequests] = useState<VerificationRequest[]>([]);
   const [selected, setSelected] = useState<VerificationRequest | null>(null);
   const [notes, setNotes] = useState('');
+  const [noteError, setNoteError] = useState<string | null>(null);
   const [filter, setFilter] = useState<'all' | 'pending'>('pending');
 
   const refresh = useCallback(() => {
@@ -51,6 +52,7 @@ export const VerificationInboxPage: React.FC = () => {
   const openRequest = (req: VerificationRequest) => {
     setSelected(req);
     setNotes(req.staffNotes || '');
+    setNoteError(null);
     markInReview(req.id, profile?.fullName || 'Staff');
     refresh();
     const local = documents.find((d) => d.id === req.documentId);
@@ -59,6 +61,7 @@ export const VerificationInboxPage: React.FC = () => {
 
   const handleApprove = async () => {
     if (!selected) return;
+    setNoteError(null);
     let report = selected.faithfulnessReport;
     try {
       if (selected.documentId && documents.find((d) => d.id === selected.documentId)) {
@@ -75,9 +78,10 @@ export const VerificationInboxPage: React.FC = () => {
   const handleRequestChanges = () => {
     if (!selected) return;
     if (!notes.trim()) {
-      alert('Please add a short note explaining what the patient / care team should fix.');
+      setNoteError('Please add a short note explaining what the patient / care team should fix.');
       return;
     }
+    setNoteError(null);
     requestChanges(selected.id, profile?.fullName || 'Staff', notes.trim());
     setSelected(null);
     refresh();
@@ -233,11 +237,17 @@ export const VerificationInboxPage: React.FC = () => {
                 <label className="text-xs font-semibold text-slate-600 dark:text-slate-300">Staff notes (required for changes)</label>
                 <textarea
                   value={notes}
-                  onChange={(e) => setNotes(e.target.value)}
+                  onChange={(e) => {
+                    setNotes(e.target.value);
+                    if (noteError) setNoteError(null);
+                  }}
                   rows={3}
                   className="mt-1 w-full rounded-lg border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-950 px-3 py-2 text-sm"
                   placeholder="e.g. Dose of Metoprolol looks correct. Approve. / Please re-extract — missing follow-up date."
                 />
+                {noteError && (
+                  <p className="mt-1 text-xs font-medium text-red-600 dark:text-red-400">{noteError}</p>
+                )}
               </div>
 
               {(selected.status === 'pending' || selected.status === 'in_review') && (

@@ -166,3 +166,29 @@ export interface SystemServiceStatus {
   lastChecked: string;
   details: string;
 }
+
+export type VerificationRequestStatus =
+  | 'pending'
+  | 'in_review'
+  | 'approved'
+  | 'changes_requested'
+  | 'rejected';
+
+export interface VerificationRequest {
+  id: string;
+  documentId: string;
+  patientUserId: string;
+  patientName: string;
+  patientEmail: string;
+  fileName: string;
+  submittedAt: string;
+  status: VerificationRequestStatus;
+  carePlanSnapshot: CarePlan;
+  sourceText: string;
+  extractedSnapshot?: ExtractedDischargeData;
+  staffNotes?: string;
+  reviewedBy?: string;
+  reviewedAt?: string;
+  faithfulnessReport?: FaithfulnessReport;
+}
+

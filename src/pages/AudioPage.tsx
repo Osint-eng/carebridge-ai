@@ -6,7 +6,6 @@ import { CameraRig } from '@/components/3d/CameraRig';
 import { Play, Square, Loader2 } from 'lucide-react';
 import {
   playWithRiya,
-  isCartesiaConfigured,
   CARTESIA_QUALITY_THRESHOLD,
   CARTESIA_RIYA_VOICE_ID,
   CARTESIA_MODEL_ID,
@@ -28,11 +27,6 @@ export const AudioPage: React.FC = () => {
   const handlePlay = async () => {
     if (!currentDoc?.carePlan) return;
     setError(null);
-
-    if (!isCartesiaConfigured()) {
-      setError('Cartesia API key is missing. Set VITE_CARTESIA_API_KEY.');
-      return;
-    }
 
     const translations = currentDoc.translations || {};
     const langNameMap: Partial<Record<CartesiaLanguageCode, string>> = {

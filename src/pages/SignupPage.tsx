@@ -2,7 +2,6 @@ import React, { useState } from 'react';
 import { Link, useNavigate } from 'react-router-dom';
 import { Mail, Lock, User, ArrowRight, AlertCircle } from 'lucide-react';
 import { useAuth } from '@/context/AuthContext';
-import { UserRole } from '@/types';
 
 export const SignupPage: React.FC = () => {
   const { signup } = useAuth();
@@ -11,7 +10,6 @@ export const SignupPage: React.FC = () => {
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
   const [confirmPassword, setConfirmPassword] = useState('');
-  const [role, setRole] = useState<UserRole>('Patient');
   const [error, setError] = useState('');
   const [loading, setLoading] = useState(false);
 
@@ -33,7 +31,7 @@ export const SignupPage: React.FC = () => {
     }
 
     setLoading(true);
-    const result = await signup(fullName, email, password, role, 'English');
+    const result = await signup(fullName, email, password, 'English');
     setLoading(false);
     if (result.error) setError(result.error);
     else navigate('/dashboard');
@@ -43,7 +41,7 @@ export const SignupPage: React.FC = () => {
     <div className="min-h-screen bg-slate-950 flex items-center justify-center px-4 py-10">
       <div className="w-full max-w-md bg-slate-900 border border-slate-800 rounded-2xl p-8 shadow-xl">
         <h1 className="text-2xl font-bold text-white mb-2">Create account</h1>
-        <p className="text-slate-400 text-sm mb-6">Join CareBridge AI</p>
+        <p className="text-slate-400 text-sm mb-6">Join CareBridge AI as a Patient</p>
         {error && (
           <div className="mb-4 flex items-center gap-2 text-red-400 text-sm bg-red-950/40 border border-red-900 rounded-lg px-3 py-2">
             <AlertCircle className="w-4 h-4 shrink-0" /> {error}
@@ -107,19 +105,9 @@ export const SignupPage: React.FC = () => {
               />
             </div>
           </div>
-          <div>
-            <label className="text-xs text-slate-400 font-medium">Role</label>
-            <select
-              value={role}
-              onChange={(e) => setRole(e.target.value as UserRole)}
-              className="w-full mt-1 bg-slate-800 border border-slate-700 rounded-lg px-3 py-2.5 text-white text-sm focus:outline-none focus:border-sky-500"
-            >
-              <option value="Patient">Patient</option>
-              <option value="Caregiver">Caregiver</option>
-              <option value="Healthcare Staff">Healthcare Staff</option>
-              <option value="Administrator">Administrator</option>
-            </select>
-          </div>
+          <p className="text-xs text-slate-500">
+            Self-registered accounts are assigned the <span className="text-slate-300 font-medium">Patient</span> role. Staff and administrator roles are provisioned by an administrator.
+          </p>
           <button
             type="submit"
             disabled={loading}

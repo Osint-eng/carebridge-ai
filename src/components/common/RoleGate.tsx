@@ -4,19 +4,34 @@ import { useAuth } from '@/context/AuthContext';
 import { allowedPathsForRole } from '@/lib/roleNav';
 
 export const RoleGate: React.FC<{ children: React.ReactNode }> = ({ children }) => {
-  const { profile } = useAuth();
+  const { profile, loading } = useAuth();
   const location = useLocation();
   const path = location.pathname;
 
+  if (loading || !profile) {
+    return (
+      <div className="py-20 text-center text-sm text-slate-500">
+        Verifying permissions…
+      </div>
+    );
+  }
+
+  // Role is always sourced from the non-editable `profiles` record, never user_metadata
+  const role = profile.role;
+
+  if (path === '/admin' && role !== 'Administrator') {
+    return <Navigate to="/dashboard" replace />;
+  }
+
+  if (role === 'Administrator') {
+    return <>{children}</>;
+  }
+
   const allowed = new Set([
-    ...allowedPathsForRole(profile?.role),
+    ...allowedPathsForRole(role),
     '/dashboard',
     '/settings',
   ]);
-
-  if (profile?.role === 'Administrator') {
-    return <>{children}</>;
-  }
 
   if (!allowed.has(path)) {
     return <Navigate to="/dashboard" replace />;

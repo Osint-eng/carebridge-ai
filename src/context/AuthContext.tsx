@@ -1,6 +1,15 @@
 import React, { createContext, useContext, useEffect, useState } from 'react';
-import { supabase, isSupabaseConfigured } from '@/lib/supabase';
-import { UserProfile, UserRole } from '@/types';
+import {
+  supabase,
+  isSupabaseConfigured,
+  fetchUserProfile,
+  updateEditableProfile,
+} from '@/lib/supabase';
+import { UserProfile } from '@/types';
+
+export type EditableProfileUpdate = Partial<
+  Pick<UserProfile, 'fullName' | 'preferredLanguage' | 'avatarUrl'>
+>;
 
 interface AuthContextType {
   user: any | null;
@@ -12,11 +21,10 @@ interface AuthContextType {
     fullName: string,
     email: string,
     password: string,
-    role: UserRole,
     preferredLanguage: 'English' | 'Telugu' | 'Hindi' | 'Tamil'
   ) => Promise<{ error?: string; user?: any }>;
   logout: () => Promise<void>;
-  updateProfile: (data: Partial<UserProfile>) => Promise<{ error?: string }>;
+  updateProfile: (data: EditableProfileUpdate) => Promise<{ error?: string }>;
 }
 
 const AuthContext = createContext<AuthContextType | undefined>(undefined);
@@ -26,35 +34,29 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
   const [profile, setProfile] = useState<UserProfile | null>(null);
   const [loading, setLoading] = useState<boolean>(true);
 
-  const mapUserToProfile = (u: any): UserProfile => {
-    const meta = u?.user_metadata || {};
-    return {
-      id: u?.id || 'guest',
-      email: u?.email || '',
-      fullName: meta.full_name || meta.fullName || (u?.email ? u.email.split('@')[0] : ''),
-      role: (meta.role as UserRole) || 'Patient',
-      preferredLanguage: (meta.preferred_language || meta.preferredLanguage) || 'English',
-      createdAt: u?.created_at || new Date().toISOString(),
-    };
-  };
-
   useEffect(() => {
+    let active = true;
+
     const initAuth = async () => {
       try {
         const { data } = await supabase.auth.getUser();
+        if (!active) return;
         if (data?.user) {
           setUser(data.user);
-          setProfile(mapUserToProfile(data.user));
+          const resolved = await fetchUserProfile(data.user);
+          if (active) setProfile(resolved);
         } else {
           setUser(null);
           setProfile(null);
         }
       } catch (err) {
         console.error('Error fetching auth user:', err);
-        setUser(null);
-        setProfile(null);
+        if (active) {
+          setUser(null);
+          setProfile(null);
+        }
       } finally {
-        setLoading(false);
+        if (active) setLoading(false);
       }
     };
 
@@ -62,9 +64,11 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
 
     const { data: authListener } = supabase.auth.onAuthStateChange(
       async (_event: string, session: any) => {
+        if (!active) return;
         if (session?.user) {
           setUser(session.user);
-          setProfile(mapUserToProfile(session.user));
+          const resolved = await fetchUserProfile(session.user);
+          if (active) setProfile(resolved);
         } else {
           setUser(null);
           setProfile(null);
@@ -73,6 +77,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
     );
 
     return () => {
+      active = false;
       authListener?.subscription?.unsubscribe();
     };
   }, []);
@@ -98,7 +103,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
 
       if (data?.user) {
         setUser(data.user);
-        setProfile(mapUserToProfile(data.user));
+        setProfile(await fetchUserProfile(data.user));
         return { user: data.user };
       }
 
@@ -112,17 +117,16 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
     fullName: string,
     email: string,
     password: string,
-    role: UserRole,
     preferredLanguage: 'English' | 'Telugu' | 'Hindi' | 'Tamil'
   ): Promise<{ error?: string; user?: any }> => {
     try {
+      // Role is never sent from the client; self-signup always provisions Patient.
       const { data, error } = await supabase.auth.signUp({
         email: email.trim().toLowerCase(),
         password: password.trim(),
         options: {
           data: {
             full_name: fullName.trim(),
-            role,
             preferred_language: preferredLanguage,
           },
         },
@@ -130,7 +134,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
       if (error) return { error: error.message };
       if (data?.user) {
         setUser(data.user);
-        setProfile(mapUserToProfile(data.user));
+        setProfile(await fetchUserProfile(data.user));
         return { user: data.user };
       }
       return { error: 'Account registration failed. Please try again.' };
@@ -149,25 +153,27 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
     }
   };
 
-  const updateProfile = async (data: Partial<UserProfile>): Promise<{ error?: string }> => {
+  const updateProfile = async (data: EditableProfileUpdate): Promise<{ error?: string }> => {
+    if (!profile) {
+      return { error: 'Not authenticated.' };
+    }
     try {
-      if (supabase.auth.updateUser) {
-        const { error } = await supabase.auth.updateUser({
-          data: {
-            full_name: data.fullName ?? profile?.fullName,
-            role: data.role ?? profile?.role,
-            preferred_language: data.preferredLanguage ?? profile?.preferredLanguage,
-          },
-        });
-        if (error) return { error: error.message };
-      }
-      if (profile) {
-        setProfile({
-          ...profile,
-          ...data,
-          updatedAt: new Date().toISOString(),
-        });
-      }
+      // Strip any role field even if passed at runtime via unsafe cast
+      const { role: _ignoredRole, ...safeData } = data as Partial<UserProfile>;
+
+      const { error } = await updateEditableProfile(profile.id, {
+        fullName: safeData.fullName,
+        preferredLanguage: safeData.preferredLanguage,
+      });
+      if (error) return { error };
+
+      setProfile({
+        ...profile,
+        ...(safeData.fullName ? { fullName: safeData.fullName.trim() } : {}),
+        ...(safeData.preferredLanguage ? { preferredLanguage: safeData.preferredLanguage } : {}),
+        ...(safeData.avatarUrl !== undefined ? { avatarUrl: safeData.avatarUrl } : {}),
+        updatedAt: new Date().toISOString(),
+      });
       return {};
     } catch (err: any) {
       return { error: err.message || 'Failed to update profile.' };

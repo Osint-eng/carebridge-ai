@@ -1,12 +1,9 @@
 /**
  * Cartesia TTS client — Riya (College Roommate, Standard Hindi / Indian)
+ * Calls the server-side /api/tts endpoint so no API key is ever exposed to the browser.
  * Multilingual Indic: Hindi, Tamil, Telugu, Kannada, Marathi, Punjabi,
  * Odia, Urdu, Bengali, Gujarati, Malayalam (+ English).
- * Docs: https://docs.cartesia.ai
  */
-
-const CARTESIA_API_KEY =
-  import.meta.env.VITE_CARTESIA_API_KEY || 'sk_car_PPWhAgBTRFwe9bK1h2oRpD';
 
 /** Riya — College Roommate (Standard Hindi, feminine, India) */
 export const CARTESIA_RIYA_VOICE_ID = 'faf0731e-dfb9-4cfc-8119-259a79b27e12';
@@ -20,8 +17,7 @@ export const CARTESIA_MODEL_ID = 'sonic-3';
 /** Confidence / quality threshold (0–1) — same jury benchmark */
 export const CARTESIA_QUALITY_THRESHOLD = 0.8;
 
-const CARTESIA_VERSION = '2025-04-16';
-const TTS_BYTES_URL = 'https://api.cartesia.ai/tts/bytes';
+const TTS_PROXY_URL = '/api/tts';
 
 /** Supported care-plan voice languages (Cartesia language codes) */
 export type CartesiaLanguageCode =
@@ -59,10 +55,6 @@ export const INDIC_VOICE_LANGUAGES: VoiceLanguageOption[] = [
   { code: 'en', label: 'English (India)', nativeLabel: 'English' },
 ];
 
-export function isCartesiaConfigured(): boolean {
-  return Boolean(CARTESIA_API_KEY && CARTESIA_API_KEY.startsWith('sk_car_'));
-}
-
 export interface SynthesizeOptions {
   modelId?: string;
   voiceId?: string;
@@ -71,56 +63,44 @@ export interface SynthesizeOptions {
 }
 
 /**
- * Generate speech with Cartesia Riya voice and return a playable Blob (WAV).
+ * Request speech from the /api/tts serverless function and return a playable Blob (WAV).
  */
 export async function synthesizeSpeech(
   transcript: string,
   options?: SynthesizeOptions
 ): Promise<Blob> {
-  if (!isCartesiaConfigured()) {
-    throw new Error('Cartesia API key is not configured.');
-  }
-
   const language = options?.language || 'hi';
 
-  const body = {
-    model_id: options?.modelId || CARTESIA_MODEL_ID,
-    transcript: transcript.slice(0, 4000),
-    voice: {
-      mode: 'id' as const,
-      id: options?.voiceId || CARTESIA_RIYA_VOICE_ID,
-    },
-    output_format: {
-      container: 'wav' as const,
-      encoding: 'pcm_s16le' as const,
-      sample_rate: 44100,
-    },
-    language,
-  };
-
-  const res = await fetch(TTS_BYTES_URL, {
+  const res = await fetch(TTS_PROXY_URL, {
     method: 'POST',
     headers: {
       'Content-Type': 'application/json',
-      'Cartesia-Version': CARTESIA_VERSION,
-      'X-API-Key': CARTESIA_API_KEY,
-      Authorization: `Bearer ${CARTESIA_API_KEY}`,
     },
-    body: JSON.stringify(body),
+    body: JSON.stringify({
+      text: transcript.slice(0, 4000),
+      language,
+      voiceId: options?.voiceId || CARTESIA_RIYA_VOICE_ID,
+      modelId: options?.modelId || CARTESIA_MODEL_ID,
+    }),
   });
 
   if (!res.ok) {
-    const errText = await res.text().catch(() => '');
-    throw new Error(
-      `Cartesia TTS failed (${res.status}): ${errText || res.statusText}`
-    );
+    let message = `Audio synthesis failed (${res.status})`;
+    try {
+      const data = await res.json();
+      if (data?.error) message = data.error;
+    } catch {
+      const errText = await res.text().catch(() => '');
+      if (errText) message = `${message}: ${errText}`;
+    }
+    throw new Error(message);
   }
 
   return res.blob();
 }
 
 /**
- * Play transcript with Riya (Indic) voice.
+ * Play transcript with Riya (Indic) voice via /api/tts.
  * Returns a cleanup function to stop playback.
  */
 export async function playWithRiya(

@@ -56,13 +56,19 @@ Optional environment variables:
 ```
 VITE_SUPABASE_URL=your_supabase_url
 VITE_SUPABASE_ANON_KEY=your_anon_key
-VITE_CARTESIA_API_KEY=sk_car_...   # Cartesia TTS (Daniel). Falls back to built-in key if unset.
 ```
 
-If Supabase is not set, the app uses secure local storage for auth.
+Server-side environment variable (Vercel Project Settings -> Environment Variables, **never** prefixed with `VITE_`):
+```
+CARTESIA_API_KEY=your_cartesia_api_key   # Used exclusively by /api/tts serverless function
+```
+
+> **Security note:** Never expose `CARTESIA_API_KEY` in client code or `VITE_` variables. If a Cartesia API key was ever committed to git history, revoke/rotate it immediately in the Cartesia dashboard and set the replacement only in Vercel environment variables.
+
+If Supabase is not set, the app uses local demo storage for auth.
 
 **Thresholds:** Clinical validation and faithfulness checks use a unified pass threshold of **0.8** (80%).  
-**Voice:** Audio Care Plan uses Cartesia **Daniel** (`sonic-3`).
+**Voice:** Audio Care Plan uses Cartesia **Riya** (`sonic-3`) via `/api/tts`.
 
 ## H2 Challenge workflow
 
